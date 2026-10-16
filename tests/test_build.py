@@ -98,7 +98,7 @@ def test_lint_failure_keeps_previous_build_and_leaves_no_staging(cache, tmp_path
 
     monkeypatch.setattr("houritsu_builder.build.subprocess.run", fake_run)
     with pytest.raises(SystemExit, match="markdownlint failed"):
-        build(cache, out, lint=True)
+        build(cache, out, lint=True, jobs=1)
     assert git(out, "rev-parse", "main") == before
     assert not (tmp_path / "out.building").exists()
     assert not (cache.root / "lint").exists()

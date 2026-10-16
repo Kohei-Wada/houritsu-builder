@@ -4,7 +4,7 @@ import json
 import os
 import shutil
 import subprocess
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from importlib import resources
 from itertools import islice
 from pathlib import Path
@@ -80,7 +80,7 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
                     unknown.update(found)
                     changed[r.path] = frontmatter(r.law_info, r.rev) + markdown
                     if lint_dir:
-                        target = lint_dir / r.path.removesuffix(".md") / f"{r.revision_id}.md"
+                        target = lint_dir / str(files % jobs) / r.path.removesuffix(".md") / f"{r.revision_id}.md"
                         target.parent.mkdir(parents=True, exist_ok=True)
                         target.write_text(changed[r.path])
                     files += 1
@@ -113,8 +113,18 @@ def _copy_remote_config(old: Path, new: Path) -> None:
         subprocess.run(["git", "config", "--add", key, value], cwd=new, check=True)
 
 
+def _lint(lint_dir: Path) -> tuple[int, str]:
+    shards = sorted(p for p in lint_dir.iterdir() if p.is_dir())
+    for shard in shards:
+        (shard / ".markdownlint-cli2.yaml").write_text(_asset("markdownlint-cli2.yaml"))
+    with ThreadPoolExecutor(max(len(shards), 1)) as pool:
+        results = list(pool.map(lambda d: subprocess.run(MARKDOWNLINT, cwd=d, capture_output=True, text=True), shards))
+    return max((r.returncode for r in results), default=0), "".join(r.stdout + r.stderr for r in results if r.returncode)
+
+
 def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = True, jobs: int | None = None) -> dict:
     out = Path(out)
+    jobs = jobs or os.cpu_count() or 1
     staging = out.with_name(out.name + ".building")
     if out.exists() and any(out.iterdir()) and not (out / MARKER).exists():
         raise SystemExit(f"{out} is not empty and not a previous build; refusing to touch it")
@@ -127,8 +137,7 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
         if lint:
             shutil.rmtree(lint_dir, ignore_errors=True)
             lint_dir.mkdir(parents=True)
-        files = _stream(cache, staging, main_groups, upcoming_groups, lint_dir if lint else None, unknown,
-                        jobs or os.cpu_count() or 1)
+        files = _stream(cache, staging, main_groups, upcoming_groups, lint_dir if lint else None, unknown, jobs)
         subprocess.run(["git", "reset", "-q", "--hard", "main"], cwd=staging, check=True)
 
         report = {
@@ -141,10 +150,8 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
             "lint": "skipped",
         }
         if lint:
-            (lint_dir / ".markdownlint-cli2.yaml").write_text(_asset("markdownlint-cli2.yaml"))
-            result = subprocess.run(MARKDOWNLINT, cwd=lint_dir, capture_output=True, text=True)
-            output = result.stdout + result.stderr
-            if result.returncode != 0:
+            returncode, output = _lint(lint_dir)
+            if returncode != 0:
                 (cache.root / "lint.log").write_text(output)
                 raise SystemExit("markdownlint failed (full log: lint.log in cache):\n" + output[:4000])
             report["lint"] = "ok"
