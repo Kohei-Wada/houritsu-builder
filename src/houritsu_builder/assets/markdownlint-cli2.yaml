@@ -1,0 +1,11 @@
+config:
+  default: true
+  MD013: false          # statute sentences are long by nature
+  MD024: false          # every 附則 has the same heading
+  MD025:
+    front_matter_title: ""   # frontmatter title is metadata, the H1 is the law title
+  MD026: false          # captions may end in full-width punctuation
+  MD033:
+    allowed_elements: [ruby, rt]
+globs:
+  - "laws/**/*.md"
