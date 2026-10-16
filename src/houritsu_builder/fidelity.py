@@ -1,11 +1,12 @@
 import re
 import xml.etree.ElementTree as ET
 
-from houritsu_builder.render import SKIPPED_TAGS
+from houritsu_builder.render import CONTAINERS, SKIPPED_TAGS
 from houritsu_builder.xmltext import strip_ascii_ws
 
 _FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
-_PREFIX = re.compile(r"^(#{1,6} | *- )")
+_PREFIX = re.compile(r"^(#{1,6} | *- | *-$)")
+_ARTICLE_PARENTS = {"MainProvision", "SupplProvision", *CONTAINERS}
 _TAGS = re.compile(r"</?(ruby|rt|sup|sub)>")
 
 
@@ -13,9 +14,9 @@ class FidelityError(Exception):
     pass
 
 
-def _walk(el: ET.Element, out: list[str]) -> None:
+def _walk(el: ET.Element, out: list[str], parent: str = "") -> None:
     children = list(el)
-    if el.tag == "Article":  # rendered as title then caption
+    if el.tag == "Article" and parent in _ARTICLE_PARENTS:  # rendered as title then caption
         caption = el.find("ArticleCaption")
         if caption is not None:
             children.remove(caption)
@@ -23,7 +24,7 @@ def _walk(el: ET.Element, out: list[str]) -> None:
             children.insert(title_at + 1, caption)
     out.append(el.text or "")
     for c in children:
-        _walk(c, out)
+        _walk(c, out, el.tag)
         out.append(c.tail or "")
 
 

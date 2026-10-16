@@ -46,3 +46,19 @@ def test_toc_quoted_in_a_sentence_is_text_but_top_level_toc_is_skipped():
            "</QuoteStruct>」に改める。</Sentence></ParagraphSentence></Paragraph></MainProvision></LawBody></Law>").encode()
     assert xml_text(xml) == "法「第一章　総則」に改める。"
     check(xml, render_law(xml).markdown, "t")
+
+
+def test_quoted_article_keeps_document_order():
+    xml = ("<Law><LawBody><MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>次の一条を加える。"
+           "<QuoteStruct><Article><ArticleCaption>（目的）</ArticleCaption><ArticleTitle>第二条</ArticleTitle></Article></QuoteStruct>"
+           "</Sentence></ParagraphSentence></Paragraph></MainProvision></LawBody></Law>").encode()
+    assert xml_text(xml) == "次の一条を加える。（目的）第二条"
+    check(xml, render_law(xml).markdown, "t")
+
+
+def test_empty_item_marker_is_not_text():
+    xml = ("<Law><LawBody><MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>"
+           "<Item><ItemTitle/><ItemSentence><Sentence/></ItemSentence></Item>"
+           "<Item><ItemTitle>三</ItemTitle><ItemSentence><Sentence>号</Sentence></ItemSentence></Item>"
+           "</Paragraph></MainProvision></LawBody></Law>").encode()
+    check(xml, render_law(xml).markdown, "t")
