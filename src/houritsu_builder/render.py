@@ -28,9 +28,9 @@ class _Renderer:
         if text:
             self.block("#" * min(level, 6) + " " + text)
 
-    def fallback(self, el: ET.Element) -> None:
+    def fallback(self, el: ET.Element, indent: str = "") -> None:
         self.unknown[el.tag] += 1
-        self.block(inline(el))
+        self.block(indent + inline(el) if inline(el) else "")
 
     def body(self, body: ET.Element) -> None:
         for el in body:
@@ -119,11 +119,11 @@ class _Renderer:
             if child.tag in ITEMS:
                 self.item(child, depth + 1)
             elif child.tag == "TableStruct":
-                self.table(child)
+                self.table(child, "  " * (depth + 1))
             elif child.tag == "List":
                 self.list_(child, depth + 1)
             else:
-                self.fallback(child)
+                self.fallback(child, "  " * (depth + 1))
 
     def list_(self, el: ET.Element, depth: int) -> None:
         for child in el:
@@ -141,14 +141,12 @@ class _Renderer:
             else:
                 self.block(inline(child))
 
-    def table(self, el: ET.Element) -> None:
+    def table(self, el: ET.Element, indent: str = "") -> None:
         for child in el:
-            if child.tag == "Table":
-                for row in child:
-                    for col in row:
-                        self.block(inline(col))
-            else:
-                self.block(inline(child))
+            cells = [col for row in child for col in row] if child.tag == "Table" else [child]
+            for text in map(inline, cells):
+                if text:
+                    self.block(indent + text)
 
     def suppl(self, el: ET.Element) -> None:
         label = el.find("SupplProvisionLabel")

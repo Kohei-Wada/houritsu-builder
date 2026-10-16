@@ -166,3 +166,16 @@ def test_sup_sub_in_paragraph():
     xml = law("<MainProvision>" + para("Ｘ<Sup>２</Sup>と<Sub>１</Sub>。") + "</MainProvision>")
     r = _checked(xml)
     assert r.markdown.endswith("Ｘ<sup>２</sup>と<sub>１</sub>。\n")
+
+
+def test_table_and_unknown_inside_item_stay_in_the_list():
+    table = ("<TableStruct><TableStructTitle>表</TableStructTitle><Table><TableRow><TableColumn><Sentence>元日</Sentence></TableColumn>"
+             "<TableColumn><Sentence>一月一日</Sentence></TableColumn></TableRow></Table></TableStruct>")
+    xml = law("<MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>"
+              "<Item><ItemTitle>一</ItemTitle><ItemSentence><Sentence>本</Sentence></ItemSentence>"
+              f"<Subitem1><Subitem1Title>イ</Subitem1Title><Subitem1Sentence><Sentence>甲</Sentence></Subitem1Sentence>{table}"
+              "<Remarks><Sentence>備考</Sentence></Remarks></Subitem1>"
+              "<Subitem1><Subitem1Title>ロ</Subitem1Title><Subitem1Sentence><Sentence>乙</Sentence></Subitem1Sentence></Subitem1>"
+              "</Item></Paragraph></MainProvision>")
+    r = _checked(xml)
+    assert r.markdown.endswith("- 一 本\n\n  - イ 甲\n\n    表\n\n    元日\n\n    一月一日\n\n    備考\n\n  - ロ 乙\n")
