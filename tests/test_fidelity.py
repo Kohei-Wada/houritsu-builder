@@ -1,0 +1,33 @@
+import pytest
+
+from conftest import fixture_xml
+from houritsu_builder.fidelity import FidelityError, check, md_text, xml_text
+from houritsu_builder.render import render_law
+
+SUFFIXES = ["20160101_426AC0000000043", "20190501_429AC0000000063", "20200101_430AC1000000057"]
+
+
+@pytest.mark.parametrize("suffix", SUFFIXES)
+def test_real_fixture_passes(suffix):
+    xml = fixture_xml(suffix)
+    check(xml, render_law(xml).markdown, suffix)
+
+
+def test_dropped_character_fails():
+    xml = fixture_xml(SUFFIXES[-1])
+    md = render_law(xml).markdown.replace("元日", "元", 1)
+    with pytest.raises(FidelityError, match="mismatch at char"):
+        check(xml, md, "mutated")
+
+
+def test_ascii_markup_in_text_survives():
+    xml = "<Law><LawBody><LawTitle>法</LawTitle><MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>&lt;b&gt;*注*_x_</Sentence></ParagraphSentence></Paragraph></MainProvision></LawBody></Law>".encode()
+    md = render_law(xml).markdown
+    assert "<b>*注*_x_" in md
+    check(xml, md, "ascii")
+
+
+def test_article_caption_order_and_frontmatter_ignored():
+    xml = "<Law><LawBody><LawTitle>法</LawTitle><MainProvision><Article><ArticleCaption>（目的）</ArticleCaption><ArticleTitle>第一条</ArticleTitle><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence></Paragraph></Article></MainProvision></LawBody></Law>".encode()
+    assert xml_text(xml) == "法第一条（目的）本文。"
+    assert md_text("---\ntitle: \"x\"\n---\n\n" + render_law(xml).markdown) == "法第一条（目的）本文。"
