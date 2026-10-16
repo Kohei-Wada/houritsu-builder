@@ -91,3 +91,21 @@ def test_empty_item_has_no_trailing_space():
     xml = law("<MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>"
               "<Item><ItemTitle/><ItemSentence/><Subitem1><Subitem1Title/><Subitem1Sentence/></Subitem1></Item></Paragraph></MainProvision>")
     assert render_law(xml).markdown.endswith("本文。\n\n-\n\n  -\n")
+
+
+def _fixture_xmls():
+    import base64
+    import gzip
+    import json
+
+    from conftest import FIXTURE_CACHE, TABLE_FIXTURE
+
+    paths = sorted((FIXTURE_CACHE / "data").rglob("*.json.gz")) + [TABLE_FIXTURE]
+    return [base64.b64decode(json.loads(gzip.decompress(p.read_bytes()))["law_full_text"]) for p in paths]
+
+
+def test_fixture_renders_have_no_trailing_ascii_whitespace_or_double_blank_lines():
+    for xml in _fixture_xmls():
+        md = render_law(xml).markdown
+        assert not [l for l in md.split("\n") if l.endswith((" ", "\t"))]
+        assert "\n\n\n" not in md

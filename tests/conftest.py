@@ -11,3 +11,4 @@ def fixture_xml(revision_suffix: str) -> bytes:
     cache = Cache(FIXTURE_CACHE)
     data = cache.read(cache.data_path(f"{LAW_ID}_{revision_suffix}"))
     return base64.b64decode(data["law_full_text"])
+TABLE_FIXTURE = Path(__file__).parent / "fixtures" / "table" / "141AC0000000029_20220617_504AC0000000068.json.gz"

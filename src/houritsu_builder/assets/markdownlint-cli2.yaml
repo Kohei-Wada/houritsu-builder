@@ -1,5 +1,7 @@
 config:
   default: true
+  MD009: false          # lone U+3000 table cells are statute text; markdownlint treats U+3000 as whitespace
+  MD012: false          # same: a lone U+3000 line counts as blank
   MD013: false          # statute sentences are long by nature
   MD024: false          # every 附則 has the same heading
   MD025:

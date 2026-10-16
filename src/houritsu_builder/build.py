@@ -14,6 +14,7 @@ from houritsu_builder.history import load_revisions, plan
 from houritsu_builder.render import render_law
 
 MARKER = ".git/houritsu-build"
+MARKDOWNLINT = ["npx", "--yes", "markdownlint-cli2"]
 
 
 def _asset(name: str) -> str:
@@ -102,7 +103,7 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
         }
         if lint:
             (lint_dir / ".markdownlint-cli2.yaml").write_text(_asset("markdownlint-cli2.yaml"))
-            result = subprocess.run(["npx", "--yes", "markdownlint-cli2"], cwd=lint_dir, capture_output=True, text=True)
+            result = subprocess.run(MARKDOWNLINT, cwd=lint_dir, capture_output=True, text=True)
             output = result.stdout + result.stderr
             if result.returncode != 0:
                 (cache.root / "lint.log").write_text(output)
