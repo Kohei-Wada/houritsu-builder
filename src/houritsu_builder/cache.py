@@ -38,3 +38,16 @@ class Cache:
     def revision_files(self) -> list[Path]:
         d = self.root / "revisions"
         return sorted(d.glob("*.json.gz")) if d.exists() else []
+
+    def not_found(self) -> set[str]:
+        path = self.root / "failures.jsonl"
+        if not path.exists():
+            return set()
+        found = set()
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            f = json.loads(line)
+            if f.get("kind") == "law_data" and str(f.get("error", "")).startswith("404"):
+                found.add(f["key"])
+        return found

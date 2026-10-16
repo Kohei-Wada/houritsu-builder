@@ -79,8 +79,9 @@ class Group:
         return "\n".join(lines) + "\n"
 
 
-def load_revisions(cache: Cache, law_type: str | None = None) -> tuple[list[Revision], list[str]]:
-    revisions, excluded = [], []
+def load_revisions(cache: Cache, law_type: str | None = None) -> tuple[list[Revision], list[str], list[str]]:
+    revisions, excluded, skipped = [], [], []
+    not_found = cache.not_found()
     for path in cache.revision_files():
         doc = cache.read(path)
         info = doc["law_info"]
@@ -89,11 +90,13 @@ def load_revisions(cache: Cache, law_type: str | None = None) -> tuple[list[Revi
         revs = [Revision(info["law_id"], info.get("law_num") or "", r.get("law_type") or info["law_type"], info, r) for r in doc["revisions"]]
         if not revs:
             continue
-        if any(not cache.data_path(r.revision_id).exists() for r in revs):
+        missing = {r.revision_id for r in revs if not cache.data_path(r.revision_id).exists()}
+        if missing - not_found:
             excluded.append(info["law_id"])
             continue
-        revisions += revs
-    return revisions, excluded
+        skipped += [r.revision_id for r in revs if r.revision_id in missing]
+        revisions += [r for r in revs if r.revision_id not in missing]
+    return revisions, excluded, skipped
 
 
 def plan(revisions: list[Revision]) -> tuple[list[Group], list[Group]]:

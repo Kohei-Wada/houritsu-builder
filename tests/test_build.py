@@ -28,7 +28,7 @@ def test_builds_history_from_fixture(cache, tmp_path):
     md = git(out, "show", "main:laws/act/323AC1000000178.md")
     assert md.startswith('---\nlaw_id: "323AC1000000178"\n')
     assert "# 国民の祝日に関する法律" in md
-    assert report["commits_main"] == 3 and report["excluded"] == []
+    assert report["commits_main"] == 3 and report["excluded"] == [] and report["skipped"] == []
     assert subprocess.run(["git", "rev-parse", "--verify", "-q", "upcoming"], cwd=out).returncode != 0
     assert (out / "laws" / "act" / "323AC1000000178.md").exists()  # working tree checked out
 

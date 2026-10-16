@@ -51,8 +51,8 @@ def test_message_format():
 
 
 def test_fixture_loads_three_revisions():
-    revisions, excluded = load_revisions(Cache(FIXTURE_CACHE), law_type="Act")
-    assert len(revisions) == 3 and excluded == []
+    revisions, excluded, skipped = load_revisions(Cache(FIXTURE_CACHE), law_type="Act")
+    assert len(revisions) == 3 and excluded == [] and skipped == []
     main, upcoming = plan(revisions)
     assert [g.commit_date for g in main] == ["2016-01-01", "2019-05-01", "2020-01-01"]
     assert upcoming == []
@@ -63,5 +63,26 @@ def test_law_with_missing_data_is_excluded(tmp_path):
     cache.write(cache.revisions_path("A"), {"law_info": {"law_id": "A", "law_type": "Act", "law_num": "A号"},
                                              "revisions": [{"law_revision_id": "A_1_X", "law_type": "Act"}, {"law_revision_id": "A_2_Y", "law_type": "Act"}]})
     cache.write(cache.data_path("A_1_X"), {})
-    revisions, excluded = load_revisions(cache)
-    assert revisions == [] and excluded == ["A"]
+    revisions, excluded, skipped = load_revisions(cache)
+    assert revisions == [] and excluded == ["A"] and skipped == []
+
+
+def test_revision_recorded_as_404_is_skipped_not_excluded(tmp_path):
+    cache = Cache(tmp_path)
+    cache.write(cache.revisions_path("A"), {"law_info": {"law_id": "A", "law_type": "Act", "law_num": "A号"},
+                                             "revisions": [{"law_revision_id": f"A_{n}_X", "law_type": "Act"} for n in (1, 2, 3)]})
+    cache.write(cache.data_path("A_1_X"), {})
+    cache.write(cache.data_path("A_3_X"), {})
+    cache.record_failure("law_data", "A_2_X", "404 https://x/law_data/A_2_X")
+    revisions, excluded, skipped = load_revisions(cache)
+    assert [r.revision_id for r in revisions] == ["A_1_X", "A_3_X"]
+    assert skipped == ["A_2_X"] and excluded == []
+
+
+def test_not_found_reads_only_404_law_data_failures(tmp_path):
+    cache = Cache(tmp_path)
+    assert cache.not_found() == set()
+    cache.record_failure("law_data", "A_1_X", "404 u")
+    cache.record_failure("law_data", "A_2_X", "gave up after 5 attempts")
+    cache.record_failure("revisions", "B", "404 u")
+    assert cache.not_found() == {"A_1_X"}

@@ -84,7 +84,7 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
     _prepare(staging)
     lint_dir = cache.root / "lint"
     try:
-        revisions, excluded = load_revisions(cache, law_type)
+        revisions, excluded, skipped = load_revisions(cache, law_type)
         main_groups, upcoming_groups = plan(revisions)
         unknown = collections.Counter()
         if lint:
@@ -98,6 +98,7 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
             "commits_upcoming": len(upcoming_groups),
             "files": files,
             "excluded": excluded,
+            "skipped": skipped,
             "unknown": dict(unknown.most_common()),
             "lint": "skipped",
         }
