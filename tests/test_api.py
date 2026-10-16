@@ -1,3 +1,4 @@
+import http.client
 import urllib.error
 
 import pytest
@@ -61,3 +62,29 @@ def test_give_up_keeps_last_error_and_skips_final_backoff():
         client.get_json("laws")
     assert exc.value.__cause__ is last
     assert sleeps == [2.0]
+
+
+def _flaky(first):
+    calls = []
+
+    def opener(url):
+        calls.append(url)
+        if len(calls) == 1:
+            if isinstance(first, Exception):
+                raise first
+            return first
+        return b'{"ok": 1}'
+
+    return opener
+
+
+@pytest.mark.parametrize("first", [
+    http.client.IncompleteRead(b""),
+    b"\xff\xfe",
+    urllib.error.HTTPError("https://x/laws", 500, "err", {}, None),
+])
+def test_transient_failures_are_retried(first):
+    sleeps = []
+    client = Client(base="https://x", delay=1.0, opener=_flaky(first), sleep=sleeps.append)
+    assert client.get_json("laws") == {"ok": 1}
+    assert sleeps == [2.0, 1.0]

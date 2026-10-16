@@ -1,3 +1,4 @@
+import http.client
 import json
 import time
 import urllib.error
@@ -45,7 +46,7 @@ class Client:
                 if e.code == 404:
                     raise ApiError(f"404 {url}") from e
                 last = e
-            except (OSError, json.JSONDecodeError) as e:
+            except (OSError, ValueError, http.client.HTTPException) as e:
                 last = e
             else:
                 self.sleep(self.delay)
