@@ -18,6 +18,7 @@ from houritsu_builder.render import render_law
 
 MARKER = ".git/houritsu-build"
 MARKDOWNLINT = ["npx", "--yes", "markdownlint-cli2@0.23.3"]
+LINT_SHARDS = 8  # each node process grows to ~2 GB before collecting
 
 
 def _asset(name: str) -> str:
@@ -80,7 +81,7 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
                     unknown.update(found)
                     changed[r.path] = frontmatter(r.law_info, r.rev) + markdown
                     if lint_dir:
-                        target = lint_dir / str(files % jobs) / r.path.removesuffix(".md") / f"{r.revision_id}.md"
+                        target = lint_dir / str(files % min(jobs, LINT_SHARDS)) / r.path.removesuffix(".md") / f"{r.revision_id}.md"
                         target.parent.mkdir(parents=True, exist_ok=True)
                         target.write_text(changed[r.path])
                     files += 1
