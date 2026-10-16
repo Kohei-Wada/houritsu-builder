@@ -58,3 +58,80 @@ def test_rebuild_replaces_previous_build(cache, tmp_path):
 def test_markdownlint_passes_on_every_revision(cache, tmp_path):
     report = build(cache, tmp_path / "out", lint=True)
     assert report["lint"] == "ok"
+
+
+def _spawned(monkeypatch):
+    import houritsu_builder.build as b
+
+    procs = []
+    real = subprocess.Popen
+
+    def spy(*a, **k):
+        p = real(*a, **k)
+        procs.append(p)
+        return p
+
+    monkeypatch.setattr(b.subprocess, "Popen", spy)
+    return procs
+
+
+def test_lint_failure_keeps_previous_build_and_leaves_no_staging(cache, tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    build(cache, out, lint=False)
+    before = git(out, "rev-parse", "main")
+    real_run = subprocess.run
+
+    def fake_run(cmd, *a, **k):
+        if cmd[0] == "npx":
+            return subprocess.CompletedProcess(cmd, 1, stdout="x" * 5000, stderr="")
+        return real_run(cmd, *a, **k)
+
+    monkeypatch.setattr("houritsu_builder.build.subprocess.run", fake_run)
+    with pytest.raises(SystemExit, match="markdownlint failed"):
+        build(cache, out, lint=True)
+    assert git(out, "rev-parse", "main") == before
+    assert not (tmp_path / "out.building").exists()
+    assert not (cache.root / "lint").exists()
+    assert len((cache.root / "lint.log").read_text()) == 5000
+
+
+def test_fidelity_error_cleans_up(cache, tmp_path, monkeypatch):
+    from houritsu_builder.fidelity import FidelityError
+
+    procs = _spawned(monkeypatch)
+
+    def boom(xml, md, label):
+        raise FidelityError("boom")
+
+    monkeypatch.setattr("houritsu_builder.build.check", boom)
+    with pytest.raises(FidelityError):
+        build(cache, tmp_path / "out", lint=True)
+    assert procs and all(p.returncode is not None for p in procs)
+    assert not (tmp_path / "out").exists()
+    assert not (tmp_path / "out.building").exists()
+    assert not (cache.root / "lint").exists()
+
+
+def test_upcoming_branch_descends_from_main(cache, tmp_path):
+    import copy
+
+    from conftest import LAW_ID
+
+    rev_file = cache.revisions_path(LAW_ID)
+    doc = cache.read(rev_file)
+    last = doc["revisions"][-1]
+    new = copy.deepcopy(last)
+    new["law_revision_id"] = f"{LAW_ID}_20300101_999AC0000000001"
+    new["amendment_enforcement_date"] = "2030-01-01"
+    new["amendment_law_id"] = "999AC0000000001"
+    new["current_revision_status"] = "UnEnforced"
+    doc["revisions"].append(new)
+    cache.write(rev_file, doc)
+    cache.write(cache.data_path(new["law_revision_id"]), cache.read(cache.data_path(last["law_revision_id"])))
+
+    out = tmp_path / "out"
+    report = build(cache, out, lint=False)
+    assert report["commits_upcoming"] == 1
+    subprocess.run(["git", "merge-base", "--is-ancestor", "main", "upcoming"], cwd=out, check=True)
+    assert "999AC0000000001" not in git(out, "log", "--format=%B", "main")
+    assert "999AC0000000001" in git(out, "log", "--format=%B", "-1", "upcoming")
