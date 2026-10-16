@@ -86,7 +86,7 @@ class _Renderer:
         if caption is not None:
             self.block(inline(caption))
         n = inline(num) if num is not None else ""
-        self.block((n + " " if n else "") + self.sentence(sentence))
+        self.block(" ".join(t for t in (n, self.sentence(sentence)) if t))
         for child in el:
             if child in (caption, num, sentence):
                 continue
@@ -100,7 +100,7 @@ class _Renderer:
     def item(self, el: ET.Element, depth: int) -> None:
         title, sentence = el.find(f"{el.tag}Title"), el.find(f"{el.tag}Sentence")
         text = " ".join(t for t in ((inline(title) if title is not None else ""), self.sentence(sentence)) if t)
-        self.block("  " * depth + "- " + text)
+        self.block(("  " * depth + "- " + text).rstrip(" "))
         for child in el:
             if child is title or child is sentence:
                 continue
@@ -138,11 +138,13 @@ class _Renderer:
                 self.fallback(child)
 
     def appendix(self, el: ET.Element, level: int) -> None:
-        title, related = el.find(f"{el.tag}Title"), el.find("RelatedArticleNum")
-        self.heading(level, (inline(title) if title is not None else "") + (inline(related) if related is not None else ""))
-        for child in el:
-            if child is title or child is related:
-                continue
+        head_tags = {f"{el.tag}Title", "RelatedArticleNum", "ArithFormulaNum"}
+        children = list(el)
+        n = 0
+        while n < len(children) and children[n].tag in head_tags:
+            n += 1
+        self.heading(level, "".join(inline(c) for c in children[:n]))
+        for child in children[n:]:
             if child.tag == "TableStruct":
                 self.table(child)
             elif child.tag in ITEMS:

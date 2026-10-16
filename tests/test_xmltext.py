@@ -19,3 +19,8 @@ def test_inline_joins_sentences_without_pretty_whitespace():
 def test_inline_ruby():
     el = ET.fromstring("<Sentence><Ruby>𠮟<Rt>しつ</Rt></Ruby>責する。</Sentence>")
     assert inline(el) == "<ruby>𠮟<rt>しつ</rt></ruby>責する。"
+
+
+def test_inline_ruby_multiple_rt_keeps_order():
+    el = ET.fromstring("<S><Ruby>漢<Rt>かん</Rt>字<Rt>じ</Rt></Ruby></S>")
+    assert inline(el) == "<ruby>漢<rt>かん</rt>字<rt>じ</rt></ruby>"

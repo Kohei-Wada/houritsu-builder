@@ -74,3 +74,20 @@ def test_appendix_table_heading_includes_related_article():
               "<RelatedArticleNum>（第二条関係）</RelatedArticleNum><TableStruct><Table><TableRow><TableColumn>"
               "<Sentence>項目</Sentence></TableColumn></TableRow></Table></TableStruct></AppdxTable>")
     assert render_law(xml).markdown.endswith("## 別表第一（第二条関係）\n\n項目\n")
+
+
+def test_appendix_arith_formula_num_keeps_order():
+    xml = law("<MainProvision>" + para("本文。") + "</MainProvision><Appdx><ArithFormulaNum>別記</ArithFormulaNum>"
+              "<RelatedArticleNum>（第二条関係）</RelatedArticleNum><ArithFormula><Sentence>式</Sentence></ArithFormula></Appdx>")
+    assert render_law(xml).markdown.endswith("## 別記（第二条関係）\n\n式\n")
+
+
+def test_empty_sentence_paragraph_has_no_trailing_space():
+    xml = law("<MainProvision><Paragraph><ParagraphNum>２</ParagraphNum><ParagraphSentence/></Paragraph></MainProvision>")
+    assert render_law(xml).markdown.endswith("\n\n２\n")
+
+
+def test_empty_item_has_no_trailing_space():
+    xml = law("<MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>"
+              "<Item><ItemTitle/><ItemSentence/><Subitem1><Subitem1Title/><Subitem1Sentence/></Subitem1></Item></Paragraph></MainProvision>")
+    assert render_law(xml).markdown.endswith("本文。\n\n-\n\n  -\n")

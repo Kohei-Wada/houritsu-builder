@@ -17,9 +17,11 @@ def _inline(el: ET.Element) -> str:
     parts = [el.text or ""]
     for child in el:
         if child.tag == "Ruby":
-            reading = "".join(_inline(rt) for rt in child.findall("Rt"))
-            base = (child.text or "") + "".join(("" if c.tag == "Rt" else _inline(c)) + (c.tail or "") for c in child)
-            parts.append(f"<ruby>{base}<rt>{reading}</rt></ruby>")
+            body = child.text or ""
+            for c in child:
+                body += f"<rt>{_inline(c)}</rt>" if c.tag == "Rt" else _inline(c)
+                body += c.tail or ""
+            parts.append(f"<ruby>{body}</ruby>")
         else:
             parts.append(_inline(child))
         parts.append(child.tail or "")
