@@ -79,6 +79,15 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
     return files
 
 
+def _copy_remote_config(old: Path, new: Path) -> None:
+    if not (old / ".git").exists():
+        return
+    found = subprocess.run(["git", "config", "--local", "--get-regexp", r"^(remote|branch)\."], cwd=old, capture_output=True, text=True)
+    for line in found.stdout.splitlines():
+        key, value = line.split(" ", 1)
+        subprocess.run(["git", "config", "--add", key, value], cwd=new, check=True)
+
+
 def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = True) -> dict:
     out = Path(out)
     staging = out.with_name(out.name + ".building")
@@ -113,6 +122,7 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
                 (cache.root / "lint.log").write_text(output)
                 raise SystemExit("markdownlint failed (full log: lint.log in cache):\n" + output[:4000])
             report["lint"] = "ok"
+        _copy_remote_config(out, staging)
         _clear(out)
         out.rmdir()
         staging.rename(out)

@@ -54,6 +54,16 @@ def test_rebuild_replaces_previous_build(cache, tmp_path):
     assert len(git(tmp_path / "out", "log", "--format=%s", "main").splitlines()) == 4
 
 
+def test_rebuild_keeps_remote_and_tracking_config(cache, tmp_path):
+    out = tmp_path / "out"
+    build(cache, out, lint=False)
+    git(out, "remote", "add", "origin", "git@example.com:x/houritsu.git")
+    git(out, "config", "branch.main.remote", "origin")
+    build(cache, out, lint=False)
+    assert git(out, "remote", "get-url", "origin") == "git@example.com:x/houritsu.git\n"
+    assert git(out, "config", "branch.main.remote") == "origin\n"
+
+
 @pytest.mark.skipif(shutil.which("npx") is None, reason="needs node/npx for markdownlint-cli2")
 def test_markdownlint_passes_on_every_revision(cache, tmp_path):
     report = build(cache, tmp_path / "out", lint=True)
