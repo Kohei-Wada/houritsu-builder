@@ -1,0 +1,52 @@
+import json
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any, Callable
+
+BASE = "https://laws.e-gov.go.jp/api/2"
+
+
+class ApiError(Exception):
+    pass
+
+
+def _urlopen(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read()
+
+
+class Client:
+    def __init__(
+        self,
+        base: str = BASE,
+        delay: float = 1.0,
+        retries: int = 5,
+        opener: Callable[[str], bytes] | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self.base = base
+        self.delay = delay
+        self.retries = retries
+        self.opener = opener or _urlopen
+        self.sleep = sleep
+
+    def get_json(self, path: str, **params) -> Any:
+        url = f"{self.base}/{path}"
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        for attempt in range(self.retries):
+            try:
+                body = self.opener(url)
+                value = json.loads(body)
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    raise ApiError(f"404 {url}") from e
+            except (OSError, json.JSONDecodeError):
+                pass
+            else:
+                self.sleep(self.delay)
+                return value
+            self.sleep(self.delay * 2 ** (attempt + 1))
+        raise ApiError(f"gave up after {self.retries} attempts: {url}")
