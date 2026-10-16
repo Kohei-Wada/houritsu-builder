@@ -24,3 +24,8 @@ def test_inline_ruby():
 def test_inline_ruby_multiple_rt_keeps_order():
     el = ET.fromstring("<S><Ruby>漢<Rt>かん</Rt>字<Rt>じ</Rt></Ruby></S>")
     assert inline(el) == "<ruby>漢<rt>かん</rt>字<rt>じ</rt></ruby>"
+
+
+def test_inline_sup_sub():
+    el = ET.fromstring("<Sentence>Ａ<Sup>２</Sup>、Ｂ<Sub>１</Sub>及び</Sentence>")
+    assert inline(el) == "Ａ<sup>２</sup>、Ｂ<sub>１</sub>及び"

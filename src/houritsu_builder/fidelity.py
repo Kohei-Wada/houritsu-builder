@@ -6,7 +6,7 @@ from houritsu_builder.xmltext import strip_ascii_ws
 
 _FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
 _PREFIX = re.compile(r"^(#{1,6} | *- )")
-_TAGS = re.compile(r"</?(ruby|rt)>")
+_TAGS = re.compile(r"</?(ruby|rt|sup|sub)>")
 
 
 class FidelityError(Exception):

@@ -8,6 +8,6 @@ config:
     front_matter_title: ""   # frontmatter title is metadata, the H1 is the law title
   MD026: false          # captions may end in full-width punctuation
   MD033:
-    allowed_elements: [ruby, rt]
+    allowed_elements: [ruby, rt, sup, sub]
 globs:
   - "laws/**/*.md"

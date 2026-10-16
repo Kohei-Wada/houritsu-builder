@@ -38,6 +38,14 @@ class _Renderer:
                 self.heading(1, inline(el))
             elif el.tag in SKIPPED_TAGS:
                 continue
+            elif el.tag == "EnactStatement":
+                self.block(inline(el))
+            elif el.tag == "Preamble":
+                for p in el:
+                    if p.tag == "Paragraph":
+                        self.paragraph(p)
+                    else:
+                        self.fallback(p)
             elif el.tag == "MainProvision":
                 self.provision(el, 2)
             elif el.tag == "SupplProvision":
@@ -94,6 +102,10 @@ class _Renderer:
                 self.item(child, 0)
             elif child.tag == "TableStruct":
                 self.table(child)
+            elif child.tag == "List":
+                self.list_(child, 0)
+            elif child.tag == "FigStruct":
+                self.figstruct(child)
             else:
                 self.fallback(child)
 
@@ -108,8 +120,26 @@ class _Renderer:
                 self.item(child, depth + 1)
             elif child.tag == "TableStruct":
                 self.table(child)
+            elif child.tag == "List":
+                self.list_(child, depth + 1)
             else:
                 self.fallback(child)
+
+    def list_(self, el: ET.Element, depth: int) -> None:
+        for child in el:
+            if child.tag.endswith("Sentence"):
+                self.block(("  " * depth + "- " + self.sentence(child)).rstrip(" "))
+            elif child.tag.startswith("Sublist"):
+                self.list_(child, depth + 1)
+            else:
+                self.fallback(child)
+
+    def figstruct(self, el: ET.Element) -> None:
+        for child in el:
+            if child.tag == "Fig":
+                self.unknown["Fig"] += 1
+            else:
+                self.block(inline(child))
 
     def table(self, el: ET.Element) -> None:
         for child in el:

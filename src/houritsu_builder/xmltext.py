@@ -22,6 +22,9 @@ def _inline(el: ET.Element) -> str:
                 body += f"<rt>{_inline(c)}</rt>" if c.tag == "Rt" else _inline(c)
                 body += c.tail or ""
             parts.append(f"<ruby>{body}</ruby>")
+        elif child.tag in ("Sup", "Sub"):
+            t = child.tag.lower()
+            parts.append(f"<{t}>{_inline(child)}</{t}>")
         else:
             parts.append(_inline(child))
         parts.append(child.tail or "")

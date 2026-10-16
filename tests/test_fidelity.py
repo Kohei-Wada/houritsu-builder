@@ -31,3 +31,10 @@ def test_article_caption_order_and_frontmatter_ignored():
     xml = "<Law><LawBody><LawTitle>法</LawTitle><MainProvision><Article><ArticleCaption>（目的）</ArticleCaption><ArticleTitle>第一条</ArticleTitle><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence></Paragraph></Article></MainProvision></LawBody></Law>".encode()
     assert xml_text(xml) == "法第一条（目的）本文。"
     assert md_text("---\ntitle: \"x\"\n---\n\n" + render_law(xml).markdown) == "法第一条（目的）本文。"
+
+
+def test_sup_sub_tags_are_ignored():
+    xml = b"<Law><LawBody><MainProvision><Paragraph><ParagraphSentence><Sentence>A<Sup>2</Sup>B<Sub>1</Sub></Sentence></ParagraphSentence></Paragraph></MainProvision></LawBody></Law>"
+    check(xml, "A<sup>2</sup>B<sub>1</sub>\n", "t")
+    with pytest.raises(FidelityError):
+        check(xml, "A<sup>3</sup>B<sub>1</sub>\n", "t")

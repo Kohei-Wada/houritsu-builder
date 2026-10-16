@@ -109,3 +109,60 @@ def test_fixture_renders_have_no_trailing_ascii_whitespace_or_double_blank_lines
         md = render_law(xml).markdown
         assert not [l for l in md.split("\n") if l.endswith((" ", "\t"))]
         assert "\n\n\n" not in md
+
+
+def _checked(xml):
+    from houritsu_builder.fidelity import check
+
+    r = render_law(xml)
+    check(xml, r.markdown, "t")
+    return r
+
+
+def test_list_under_paragraph_with_columns_and_sublist():
+    xml = law("<MainProvision><Paragraph><ParagraphNum>１</ParagraphNum><ParagraphSentence><Sentence>次の通り。</Sentence></ParagraphSentence>"
+              "<List><ListSentence><Column><Sentence>第一</Sentence></Column><Column><Sentence>保管義務</Sentence></Column></ListSentence>"
+              "<Sublist1><Sublist1Sentence><Sentence>細目</Sentence></Sublist1Sentence>"
+              "<Sublist2><Sublist2Sentence><Column><Sentence>甲</Sentence></Column><Column><Sentence>乙</Sentence></Column></Sublist2Sentence></Sublist2>"
+              "</Sublist1></List></Paragraph></MainProvision>")
+    r = _checked(xml)
+    assert r.markdown.endswith("１ 次の通り。\n\n- 第一 保管義務\n\n  - 細目\n\n    - 甲 乙\n")
+    assert not r.unknown
+
+
+def test_list_under_item():
+    xml = law("<MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>"
+              "<Item><ItemTitle>一</ItemTitle><ItemSentence><Sentence>項目</Sentence></ItemSentence>"
+              "<List><ListSentence><Sentence>ア</Sentence></ListSentence></List></Item></Paragraph></MainProvision>")
+    r = _checked(xml)
+    assert r.markdown.endswith("- 一 項目\n\n  - ア\n")
+    assert not r.unknown
+
+
+def test_enact_statement_is_one_block():
+    xml = law("<EnactStatement>爆発物取締罰則別冊ノ通制定ス</EnactStatement><MainProvision>" + para("本文。") + "</MainProvision>")
+    r = _checked(xml)
+    assert r.markdown.startswith("# テスト法\n\n爆発物取締罰則別冊ノ通制定ス\n\n")
+    assert not r.unknown
+
+
+def test_preamble_renders_paragraphs():
+    xml = law("<Preamble>" + para("前文一。", "１") + para("前文二。") + "</Preamble><MainProvision>" + para("本文。") + "</MainProvision>")
+    r = _checked(xml)
+    assert r.markdown.startswith("# テスト法\n\n１ 前文一。\n\n前文二。\n\n本文。\n")
+    assert not r.unknown
+
+
+def test_figstruct_blocks_and_fig_counted():
+    xml = law("<MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>"
+              '<FigStruct><FigStructTitle>図１</FigStructTitle><Remarks><RemarksLabel>備考</RemarksLabel><Sentence>注記</Sentence></Remarks>'
+              '<Fig src="./pict/x.jpg"/></FigStruct></Paragraph></MainProvision>')
+    r = _checked(xml)
+    assert r.markdown.endswith("本文。\n\n図１\n\n備考注記\n")
+    assert dict(r.unknown) == {"Fig": 1}
+
+
+def test_sup_sub_in_paragraph():
+    xml = law("<MainProvision>" + para("Ｘ<Sup>２</Sup>と<Sub>１</Sub>。") + "</MainProvision>")
+    r = _checked(xml)
+    assert r.markdown.endswith("Ｘ<sup>２</sup>と<sub>１</sub>。\n")
