@@ -11,6 +11,8 @@ Information Protection Act, and `git show <commit>` is what one amendment change
 - `laws/<law type>/<e-Gov law ID>.md`, with metadata in YAML frontmatter.
 - `main`: enforced revisions. `upcoming`: promulgated but not yet in force.
 - Commit date = enforcement date (00:00 JST). Trailers: `Amendment-Law-Id`, `Enforced`.
+- A repealed law's file is deleted in the repealing law's commit; its history stays in
+  `git log -- <file>`.
 
 ## Source
 
