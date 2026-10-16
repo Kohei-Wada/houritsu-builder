@@ -1,0 +1,160 @@
+import collections
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+
+from houritsu_builder.xmltext import inline
+
+CONTAINERS = ("Part", "Chapter", "Section", "Subsection", "Division")
+ITEMS = ("Item",) + tuple(f"Subitem{i}" for i in range(1, 11))
+SKIPPED_TAGS = {"TOC"}
+
+
+@dataclass
+class Rendered:
+    markdown: str
+    unknown: collections.Counter = field(default_factory=collections.Counter)
+
+
+class _Renderer:
+    def __init__(self):
+        self.blocks: list[str] = []
+        self.unknown = collections.Counter()
+
+    def block(self, text: str) -> None:
+        if text:
+            self.blocks.append(text)
+
+    def heading(self, level: int, text: str) -> None:
+        if text:
+            self.block("#" * min(level, 6) + " " + text)
+
+    def fallback(self, el: ET.Element) -> None:
+        self.unknown[el.tag] += 1
+        self.block(inline(el))
+
+    def body(self, body: ET.Element) -> None:
+        for el in body:
+            if el.tag == "LawTitle":
+                self.heading(1, inline(el))
+            elif el.tag in SKIPPED_TAGS:
+                continue
+            elif el.tag == "MainProvision":
+                self.provision(el, 2)
+            elif el.tag == "SupplProvision":
+                self.suppl(el)
+            elif el.tag.startswith("Appdx"):
+                self.appendix(el, 2)
+            else:
+                self.fallback(el)
+
+    def provision(self, el: ET.Element, level: int) -> None:
+        for child in el:
+            if child.tag in CONTAINERS:
+                self.container(child, level)
+            elif child.tag == "Article":
+                self.article(child, level)
+            elif child.tag == "Paragraph":
+                self.paragraph(child)
+            else:
+                self.fallback(child)
+
+    def container(self, el: ET.Element, level: int) -> None:
+        title = el.find(f"{el.tag}Title")
+        self.heading(level, inline(title) if title is not None else "")
+        self.provision([c for c in el if c is not title], level + 1)
+
+    def article(self, el: ET.Element, level: int) -> None:
+        title, caption = el.find("ArticleTitle"), el.find("ArticleCaption")
+        self.heading(level, (inline(title) if title is not None else "") + (inline(caption) if caption is not None else ""))
+        for child in el:
+            if child is title or child is caption:
+                continue
+            if child.tag == "Paragraph":
+                self.paragraph(child)
+            else:
+                self.fallback(child)
+
+    def sentence(self, el: ET.Element | None) -> str:
+        if el is None:
+            return ""
+        if el.find("Column") is not None:
+            return " ".join(inline(c) for c in el)
+        return inline(el)
+
+    def paragraph(self, el: ET.Element) -> None:
+        caption, num, sentence = el.find("ParagraphCaption"), el.find("ParagraphNum"), el.find("ParagraphSentence")
+        if caption is not None:
+            self.block(inline(caption))
+        n = inline(num) if num is not None else ""
+        self.block((n + " " if n else "") + self.sentence(sentence))
+        for child in el:
+            if child in (caption, num, sentence):
+                continue
+            if child.tag in ITEMS:
+                self.item(child, 0)
+            elif child.tag == "TableStruct":
+                self.table(child)
+            else:
+                self.fallback(child)
+
+    def item(self, el: ET.Element, depth: int) -> None:
+        title, sentence = el.find(f"{el.tag}Title"), el.find(f"{el.tag}Sentence")
+        text = " ".join(t for t in ((inline(title) if title is not None else ""), self.sentence(sentence)) if t)
+        self.block("  " * depth + "- " + text)
+        for child in el:
+            if child is title or child is sentence:
+                continue
+            if child.tag in ITEMS:
+                self.item(child, depth + 1)
+            elif child.tag == "TableStruct":
+                self.table(child)
+            else:
+                self.fallback(child)
+
+    def table(self, el: ET.Element) -> None:
+        for child in el:
+            if child.tag == "Table":
+                for row in child:
+                    for col in row:
+                        self.block(inline(col))
+            else:
+                self.block(inline(child))
+
+    def suppl(self, el: ET.Element) -> None:
+        label = el.find("SupplProvisionLabel")
+        self.heading(2, inline(label) if label is not None else "")
+        for child in el:
+            if child is label:
+                continue
+            if child.tag == "Article":
+                self.article(child, 3)
+            elif child.tag == "Paragraph":
+                self.paragraph(child)
+            elif child.tag in CONTAINERS:
+                self.container(child, 3)
+            elif child.tag.startswith("SupplProvisionAppdx"):
+                self.appendix(child, 3)
+            else:
+                self.fallback(child)
+
+    def appendix(self, el: ET.Element, level: int) -> None:
+        title, related = el.find(f"{el.tag}Title"), el.find("RelatedArticleNum")
+        self.heading(level, (inline(title) if title is not None else "") + (inline(related) if related is not None else ""))
+        for child in el:
+            if child is title or child is related:
+                continue
+            if child.tag == "TableStruct":
+                self.table(child)
+            elif child.tag in ITEMS:
+                self.item(child, 0)
+            elif child.tag == "Paragraph":
+                self.paragraph(child)
+            else:
+                self.fallback(child)
+
+
+def render_law(xml: bytes) -> Rendered:
+    root = ET.fromstring(xml)
+    r = _Renderer()
+    r.body(root.find("LawBody"))
+    return Rendered("\n\n".join(r.blocks) + "\n", r.unknown)
