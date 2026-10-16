@@ -10,10 +10,10 @@ from itertools import islice
 from pathlib import Path
 
 from houritsu_builder.cache import Cache
-from houritsu_builder.fastimport import Stream
+from houritsu_builder.fastimport import Stream, write_blob
 from houritsu_builder.fidelity import check
 from houritsu_builder.frontmatter import frontmatter
-from houritsu_builder.history import load_revisions, plan
+from houritsu_builder.history import Revision, load_revisions, plan
 from houritsu_builder.render import render_law
 
 MARKER = ".git/houritsu-build"
@@ -39,30 +39,37 @@ def _prepare(staging: Path) -> None:
     (staging / MARKER).write_text("created by houritsu-builder\n")
 
 
-def _render(root: Path, revision_id: str) -> tuple[str, collections.Counter]:
+def _render(root: Path, objects: Path, r: Revision, lint_file: Path | None) -> tuple[str, collections.Counter]:
     cache = Cache(root)
-    xml = base64.b64decode(cache.read(cache.data_path(revision_id))["law_full_text"])
+    xml = base64.b64decode(cache.read(cache.data_path(r.revision_id))["law_full_text"])
     rendered = render_law(xml)
-    check(xml, rendered.markdown, revision_id)
-    return rendered.markdown, rendered.unknown
+    check(xml, rendered.markdown, r.revision_id)
+    text = frontmatter(r.law_info, r.rev) + rendered.markdown
+    if lint_file:
+        lint_file.parent.mkdir(parents=True, exist_ok=True)
+        lint_file.write_text(text)
+    return write_blob(objects, text.encode()), rendered.unknown
 
 
-def _rendered_in_order(cache: Cache, revision_ids, jobs: int):
+def _rendered_in_order(tasks, jobs: int):
     if jobs <= 1:
-        yield from (_render(cache.root, rid) for rid in revision_ids)
+        yield from (_render(*t) for t in tasks)
         return
-    ids = iter(revision_ids)
+    tasks = iter(tasks)
     with ProcessPoolExecutor(jobs) as pool:
-        window = collections.deque(pool.submit(_render, cache.root, rid) for rid in islice(ids, jobs * 4))
+        window = collections.deque(pool.submit(_render, *t) for t in islice(tasks, jobs * 4))
         while window:
             result = window.popleft().result()
-            window.extend(pool.submit(_render, cache.root, rid) for rid in islice(ids, 1))
+            window.extend(pool.submit(_render, *t) for t in islice(tasks, 1))
             yield result
 
 
 def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir: Path | None, unknown, jobs: int) -> int:
-    rendered = _rendered_in_order(cache, [r.revision_id for g in main_groups + upcoming_groups
-                                          for r in g.revisions if not r.repealed], jobs)
+    todo = [r for g in main_groups + upcoming_groups for r in g.revisions if not r.repealed]
+    shards = min(jobs, LINT_SHARDS)
+    rendered = _rendered_in_order(((cache.root, staging / ".git" / "objects", r,
+                                    lint_dir / str(i % shards) / r.path.removesuffix(".md") / f"{r.revision_id}.md" if lint_dir else None)
+                                   for i, r in enumerate(todo)), jobs)
     proc = subprocess.Popen(["git", "fast-import", "--quiet", "--done"], cwd=staging, stdin=subprocess.PIPE)
     files = 0
     try:
@@ -72,21 +79,17 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
                       {"README.md": _asset("README.md"), ".markdownlint-cli2.yaml": _asset("markdownlint-cli2.yaml")})
         for ref, groups in (("refs/heads/main", main_groups), ("refs/heads/upcoming", upcoming_groups)):
             for i, group in enumerate(groups):
-                changed, deleted = {}, set()
+                blobs, deleted = {}, set()
                 for r in group.revisions:
                     if r.repealed:
                         deleted.add(r.path)
                         continue
-                    markdown, found = next(rendered)
+                    blobs[r.path], found = next(rendered)
                     unknown.update(found)
-                    changed[r.path] = frontmatter(r.law_info, r.rev) + markdown
-                    if lint_dir:
-                        target = lint_dir / str(files % min(jobs, LINT_SHARDS)) / r.path.removesuffix(".md") / f"{r.revision_id}.md"
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        target.write_text(changed[r.path])
                     files += 1
                 from_ref = "refs/heads/main" if ref.endswith("upcoming") and i == 0 else None
-                stream.commit(ref, group.commit_date, group.message(), changed, from_ref=from_ref, deleted=deleted, author=group.author)
+                stream.commit(ref, group.commit_date, group.message(), {}, from_ref=from_ref, deleted=deleted,
+                              author=group.author, blobs=blobs)
         stream.done()
     except BaseException as e:
         proc.kill()

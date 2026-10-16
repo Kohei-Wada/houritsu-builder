@@ -1,7 +1,7 @@
 import io
 import subprocess
 
-from houritsu_builder.fastimport import Stream, jst_midnight
+from houritsu_builder.fastimport import Stream, jst_midnight, write_blob
 
 
 def test_jst_midnight():
@@ -35,3 +35,17 @@ def test_stream_deletes_files(tmp_path):
     subprocess.run(["git", "fast-import", "--quiet", "--done"], cwd=tmp_path, input=buf.getvalue(), check=True)
     files = subprocess.run(["git", "ls-tree", "-r", "--name-only", "main"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout
     assert files.splitlines() == ["laws/act/B.md"]
+
+
+def test_stream_references_loose_blobs(tmp_path):
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    sha = write_blob(tmp_path / ".git" / "objects", "# 法\n".encode())
+    assert sha == subprocess.run(["git", "hash-object", "--stdin"], input="# 法\n".encode(), capture_output=True, check=True).stdout.decode().strip()
+    buf = io.BytesIO()
+    s = Stream(buf)
+    s.commit("refs/heads/main", "2017-03-01", "初版\n", {"README.md": "r\n"}, blobs={"laws/act/A.md": sha})
+    s.done()
+    subprocess.run(["git", "fast-import", "--quiet", "--done"], cwd=tmp_path, input=buf.getvalue(), check=True)
+    show = subprocess.run(["git", "show", "main:laws/act/A.md"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout
+    assert show == "# 法\n"
+    subprocess.run(["git", "fsck", "--strict"], cwd=tmp_path, check=True, capture_output=True)
