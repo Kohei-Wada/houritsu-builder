@@ -34,8 +34,8 @@ def test_builds_history_from_fixture(cache, tmp_path):
 
 
 def test_build_is_deterministic(cache, tmp_path):
-    build(cache, tmp_path / "a", lint=False)
-    build(cache, tmp_path / "b", lint=False)
+    build(cache, tmp_path / "a", lint=False, jobs=1)
+    build(cache, tmp_path / "b", lint=False, jobs=4)
     assert git(tmp_path / "a", "rev-parse", "main") == git(tmp_path / "b", "rev-parse", "main")
 
 
@@ -115,7 +115,7 @@ def test_fidelity_error_cleans_up(cache, tmp_path, monkeypatch):
 
     monkeypatch.setattr("houritsu_builder.build.check", boom)
     with pytest.raises(FidelityError):
-        build(cache, tmp_path / "out", lint=True)
+        build(cache, tmp_path / "out", lint=True, jobs=1)
     assert procs and all(p.returncode is not None for p in procs)
     assert not (tmp_path / "out").exists()
     assert not (tmp_path / "out.building").exists()
@@ -164,3 +164,18 @@ def test_repeal_removes_the_file(cache, tmp_path):
     assert git(out, "ls-tree", "-r", "--name-only", "main", "laws") == ""
     assert not (out / "laws" / "act" / "323" / f"{LAW_ID}.md").exists()
     assert len(git(out, "log", "--format=%h", "main", "--", f"laws/act/323/{LAW_ID}.md").split()) == 4
+
+
+def test_worker_error_propagates_and_cleans_up(cache, tmp_path):
+    import base64
+    import xml.etree.ElementTree as ET
+
+    from conftest import LAW_ID
+
+    rid = cache.read(cache.revisions_path(LAW_ID))["revisions"][0]["law_revision_id"]
+    doc = cache.read(cache.data_path(rid))
+    doc["law_full_text"] = base64.b64encode(b"<Law>").decode()
+    cache.write(cache.data_path(rid), doc)
+    with pytest.raises(ET.ParseError):
+        build(cache, tmp_path / "out", lint=False, jobs=2)
+    assert not (tmp_path / "out.building").exists()

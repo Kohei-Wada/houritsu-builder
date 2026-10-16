@@ -1,9 +1,12 @@
 import base64
 import collections
 import json
+import os
 import shutil
 import subprocess
+from concurrent.futures import ProcessPoolExecutor
 from importlib import resources
+from itertools import islice
 from pathlib import Path
 
 from houritsu_builder.cache import Cache
@@ -35,7 +38,30 @@ def _prepare(staging: Path) -> None:
     (staging / MARKER).write_text("created by houritsu-builder\n")
 
 
-def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir: Path | None, unknown) -> int:
+def _render(root: Path, revision_id: str) -> tuple[str, collections.Counter]:
+    cache = Cache(root)
+    xml = base64.b64decode(cache.read(cache.data_path(revision_id))["law_full_text"])
+    rendered = render_law(xml)
+    check(xml, rendered.markdown, revision_id)
+    return rendered.markdown, rendered.unknown
+
+
+def _rendered_in_order(cache: Cache, revision_ids, jobs: int):
+    if jobs <= 1:
+        yield from (_render(cache.root, rid) for rid in revision_ids)
+        return
+    ids = iter(revision_ids)
+    with ProcessPoolExecutor(jobs) as pool:
+        window = collections.deque(pool.submit(_render, cache.root, rid) for rid in islice(ids, jobs * 4))
+        while window:
+            result = window.popleft().result()
+            window.extend(pool.submit(_render, cache.root, rid) for rid in islice(ids, 1))
+            yield result
+
+
+def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir: Path | None, unknown, jobs: int) -> int:
+    rendered = _rendered_in_order(cache, [r.revision_id for g in main_groups + upcoming_groups
+                                          for r in g.revisions if not r.repealed], jobs)
     proc = subprocess.Popen(["git", "fast-import", "--quiet", "--done"], cwd=staging, stdin=subprocess.PIPE)
     files = 0
     try:
@@ -50,11 +76,9 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
                     if r.repealed:
                         deleted.add(r.path)
                         continue
-                    xml = base64.b64decode(cache.read(cache.data_path(r.revision_id))["law_full_text"])
-                    rendered = render_law(xml)
-                    check(xml, rendered.markdown, r.revision_id)
-                    unknown.update(rendered.unknown)
-                    changed[r.path] = frontmatter(r.law_info, r.rev) + rendered.markdown
+                    markdown, found = next(rendered)
+                    unknown.update(found)
+                    changed[r.path] = frontmatter(r.law_info, r.rev) + markdown
                     if lint_dir:
                         target = lint_dir / r.path.removesuffix(".md") / f"{r.revision_id}.md"
                         target.parent.mkdir(parents=True, exist_ok=True)
@@ -69,6 +93,7 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
             raise SystemExit("git fast-import failed") from e
         raise
     finally:
+        rendered.close()
         try:
             proc.stdin.close()
         except BrokenPipeError:
@@ -88,7 +113,7 @@ def _copy_remote_config(old: Path, new: Path) -> None:
         subprocess.run(["git", "config", "--add", key, value], cwd=new, check=True)
 
 
-def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = True) -> dict:
+def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = True, jobs: int | None = None) -> dict:
     out = Path(out)
     staging = out.with_name(out.name + ".building")
     if out.exists() and any(out.iterdir()) and not (out / MARKER).exists():
@@ -102,7 +127,8 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
         if lint:
             shutil.rmtree(lint_dir, ignore_errors=True)
             lint_dir.mkdir(parents=True)
-        files = _stream(cache, staging, main_groups, upcoming_groups, lint_dir if lint else None, unknown)
+        files = _stream(cache, staging, main_groups, upcoming_groups, lint_dir if lint else None, unknown,
+                        jobs or os.cpu_count() or 1)
         subprocess.run(["git", "reset", "-q", "--hard", "main"], cwd=staging, check=True)
 
         report = {
