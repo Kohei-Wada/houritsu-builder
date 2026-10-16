@@ -1,0 +1,16 @@
+[global]
+include = ["laws/**/*.md"]
+disable = [
+  "MD009",  # lone U+3000 table cells are statute text; U+3000 counts as whitespace
+  "MD012",  # same: a lone U+3000 line counts as blank
+  "MD013",  # statute sentences are long by nature
+  "MD024",  # every 附則 has the same heading
+  "MD026",  # captions may end in full-width punctuation
+  "MD064",  # statute text keeps its own runs of spaces
+]
+
+[MD025]
+front-matter-title = ""  # frontmatter title is metadata, the H1 is the law title
+
+[MD033]
+allowed-elements = ["ruby", "rt", "sup", "sub"]

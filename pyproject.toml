@@ -3,7 +3,9 @@ name = "houritsu-builder"
 version = "0.1.0"
 description = "Builds the houritsu repository: Japanese laws as git history from the e-Gov law API"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "rumdl==0.2.79",
+]
 
 [project.scripts]
 houritsu-builder = "houritsu_builder.cli:main"

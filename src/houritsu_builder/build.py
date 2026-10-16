@@ -4,7 +4,8 @@ import json
 import os
 import shutil
 import subprocess
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+import sysconfig
+from concurrent.futures import ProcessPoolExecutor
 from importlib import resources
 from itertools import islice
 from pathlib import Path
@@ -17,8 +18,7 @@ from houritsu_builder.history import Revision, load_revisions, plan
 from houritsu_builder.render import render_law
 
 MARKER = ".git/houritsu-build"
-MARKDOWNLINT = ["npx", "--yes", "markdownlint-cli2@0.23.3"]
-LINT_SHARDS = 8  # each node process grows to ~2 GB before collecting
+RUMDL = str(Path(sysconfig.get_path("scripts")) / "rumdl")
 
 
 def _asset(name: str) -> str:
@@ -66,17 +66,16 @@ def _rendered_in_order(tasks, jobs: int):
 
 def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir: Path | None, unknown, jobs: int) -> int:
     todo = [r for g in main_groups + upcoming_groups for r in g.revisions if not r.repealed]
-    shards = min(jobs, LINT_SHARDS)
     rendered = _rendered_in_order(((cache.root, staging / ".git" / "objects", r,
-                                    lint_dir / str(i % shards) / r.path.removesuffix(".md") / f"{r.revision_id}.md" if lint_dir else None)
-                                   for i, r in enumerate(todo)), jobs)
+                                    lint_dir / r.path.removesuffix(".md") / f"{r.revision_id}.md" if lint_dir else None)
+                                   for r in todo), jobs)
     proc = subprocess.Popen(["git", "fast-import", "--quiet", "--done"], cwd=staging, stdin=subprocess.PIPE)
     files = 0
     try:
         stream = Stream(proc.stdin)
         root_date = main_groups[0].commit_date if main_groups else "1970-01-02"
         stream.commit("refs/heads/main", root_date, "リポジトリの初期化\n",
-                      {"README.md": _asset("README.md"), ".markdownlint-cli2.yaml": _asset("markdownlint-cli2.yaml")})
+                      {"README.md": _asset("README.md"), ".rumdl.toml": _asset("rumdl.toml")})
         for ref, groups in (("refs/heads/main", main_groups), ("refs/heads/upcoming", upcoming_groups)):
             for i, group in enumerate(groups):
                 blobs, deleted = {}, set()
@@ -118,12 +117,9 @@ def _copy_remote_config(old: Path, new: Path) -> None:
 
 
 def _lint(lint_dir: Path) -> tuple[int, str]:
-    shards = sorted(p for p in lint_dir.iterdir() if p.is_dir())
-    for shard in shards:
-        (shard / ".markdownlint-cli2.yaml").write_text(_asset("markdownlint-cli2.yaml"))
-    with ThreadPoolExecutor(max(len(shards), 1)) as pool:
-        results = list(pool.map(lambda d: subprocess.run(MARKDOWNLINT, cwd=d, capture_output=True, text=True), shards))
-    return max((r.returncode for r in results), default=0), "".join(r.stdout + r.stderr for r in results if r.returncode)
+    (lint_dir / ".rumdl.toml").write_text(_asset("rumdl.toml"))
+    result = subprocess.run([RUMDL, "check", "--no-cache", "--respect-gitignore=false", "."], cwd=lint_dir, capture_output=True, text=True)
+    return result.returncode, result.stdout + result.stderr
 
 
 def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = True, jobs: int | None = None) -> dict:
@@ -158,7 +154,7 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
             returncode, output = _lint(lint_dir)
             if returncode != 0:
                 (cache.root / "lint.log").write_text(output)
-                raise SystemExit("markdownlint failed (full log: lint.log in cache):\n" + output[:4000])
+                raise SystemExit("rumdl failed (full log: lint.log in cache):\n" + output[:4000])
             report["lint"] = "ok"
         _copy_remote_config(out, staging)
         _clear(out)

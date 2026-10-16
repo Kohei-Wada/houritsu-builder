@@ -20,7 +20,7 @@ def parser() -> argparse.ArgumentParser:
     b.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
     b.add_argument("--out", type=Path, required=True, help="directory for the new repository")
     b.add_argument("--law-type", help="only this e-Gov law_type, e.g. Act")
-    b.add_argument("--no-lint", action="store_true", help="skip markdownlint")
+    b.add_argument("--no-lint", action="store_true", help="skip rumdl")
     return p
 
 

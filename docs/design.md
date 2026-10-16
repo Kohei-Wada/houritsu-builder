@@ -25,7 +25,7 @@ snapshots the full e-Gov XML daily but has no per-amendment, human-readable hist
 
 | Repository | Contents | Visibility |
 | --- | --- | --- |
-| `Kohei-Wada/houritsu` | Generated law markdown, README, markdownlint config. Nothing else. | private until v1.0 and a terms-of-use check |
+| `Kohei-Wada/houritsu` | Generated law markdown, README, rumdl config. Nothing else. | private until v1.0 and a terms-of-use check |
 | `Kohei-Wada/houritsu-builder` | Fetch and build code, tests, this spec. | private |
 
 Keeping the generator out of the data repository keeps `git log` in `houritsu`
@@ -111,7 +111,7 @@ laws/
   ministerial-ordinance/…
   constitution/  rule/  …
 README.md
-.markdownlint-cli2.yaml
+.rumdl.toml
 ```
 
 - Directory: the e-Gov `law_type`, lower-kebab-cased (the first type when e-Gov lists
@@ -154,7 +154,7 @@ Keys are stable across builds; tools may rely on them.
 
 - Part, chapter, section and subsection titles become headings. Articles become
   headings of the form `第一条（目的）`. Heading depth follows each law's own
-  structure and always increases one level at a time (markdownlint MD001).
+  structure and always increases one level at a time (rumdl MD001).
 - Paragraphs (項) become paragraphs; items (号) and sub-items become nested lists.
 - Supplementary provisions (附則) and appended tables (別表) are included from the
   first version. Complex tables are first rendered as text and improved later.
@@ -189,8 +189,10 @@ Each check runs in tests and on every build; any failure fails the build.
 - **Text fidelity**: the text extracted from the XML equals the text extracted from
   the generated markdown, character for character. This enforces "never change the
   statute text".
-- **markdownlint** on every generated file, with the config shipped in `houritsu`
-  so consumers can run the same check.
+- **rumdl** (a markdownlint-compatible linter, pinned) on every generated file, with
+  the config shipped in `houritsu` so consumers can run the same check. It replaced
+  markdownlint-cli2, which took 170 s against rumdl's 13 s on the Act history and found
+  the same (file, rule) pairs on 417 mutated files.
 - **Determinism**: two builds from the same cache produce the same final commit hash.
 - **Unknown XML elements** are rendered as plain text, never dropped, and counted
   in a build report so conversion rules can be added most-frequent first.

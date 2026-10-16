@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from conftest import FIXTURE_CACHE
-from houritsu_builder.build import build
+from houritsu_builder.build import RUMDL, build
 from houritsu_builder.cache import Cache
 
 
@@ -64,8 +64,7 @@ def test_rebuild_keeps_remote_and_tracking_config(cache, tmp_path):
     assert git(out, "config", "branch.main.remote") == "origin\n"
 
 
-@pytest.mark.skipif(shutil.which("npx") is None, reason="needs node/npx for markdownlint-cli2")
-def test_markdownlint_passes_on_every_revision(cache, tmp_path):
+def test_rumdl_passes_on_every_revision(cache, tmp_path):
     report = build(cache, tmp_path / "out", lint=True)
     assert report["lint"] == "ok"
 
@@ -92,12 +91,12 @@ def test_lint_failure_keeps_previous_build_and_leaves_no_staging(cache, tmp_path
     real_run = subprocess.run
 
     def fake_run(cmd, *a, **k):
-        if cmd[0] == "npx":
+        if cmd[0] == RUMDL:
             return subprocess.CompletedProcess(cmd, 1, stdout="x" * 5000, stderr="")
         return real_run(cmd, *a, **k)
 
     monkeypatch.setattr("houritsu_builder.build.subprocess.run", fake_run)
-    with pytest.raises(SystemExit, match="markdownlint failed"):
+    with pytest.raises(SystemExit, match="rumdl failed"):
         build(cache, out, lint=True, jobs=1)
     assert git(out, "rev-parse", "main") == before
     assert not (tmp_path / "out.building").exists()
