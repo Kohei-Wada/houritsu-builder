@@ -22,5 +22,5 @@ Revision history is limited to what e-Gov provides.
 ## Lint
 
 ```sh
-npx markdownlint-cli2
+npx --yes markdownlint-cli2@0.23.3
 ```

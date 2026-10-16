@@ -14,7 +14,7 @@ from houritsu_builder.history import load_revisions, plan
 from houritsu_builder.render import render_law
 
 MARKER = ".git/houritsu-build"
-MARKDOWNLINT = ["npx", "--yes", "markdownlint-cli2"]
+MARKDOWNLINT = ["npx", "--yes", "markdownlint-cli2@0.23.3"]
 
 
 def _asset(name: str) -> str:
