@@ -135,3 +135,22 @@ def test_upcoming_branch_descends_from_main(cache, tmp_path):
     subprocess.run(["git", "merge-base", "--is-ancestor", "main", "upcoming"], cwd=out, check=True)
     assert "999AC0000000001" not in git(out, "log", "--format=%B", "main")
     assert "999AC0000000001" in git(out, "log", "--format=%B", "-1", "upcoming")
+
+
+def test_repeal_removes_the_file(cache, tmp_path):
+    from conftest import LAW_ID
+
+    rev_file = cache.revisions_path(LAW_ID)
+    doc = cache.read(rev_file)
+    doc["revisions"].insert(0, dict(doc["revisions"][0], law_revision_id=f"{LAW_ID}_20250401_999AC0000000001",
+                                    amendment_enforcement_date="2025-04-01", amendment_law_id="999AC0000000001",
+                                    amendment_law_title="国民の祝日に関する法律を廃止する法律",
+                                    current_revision_status="Repeal", repeal_status="Repeal"))
+    cache.write(rev_file, doc)
+    out = tmp_path / "out"
+    report = build(cache, out, lint=False)
+    assert report["commits_main"] == 4
+    assert git(out, "log", "-1", "--format=%s", "main") == "国民の祝日に関する法律を廃止する法律 施行\n"
+    assert git(out, "ls-tree", "-r", "--name-only", "main", "laws") == ""
+    assert not (out / "laws" / "act" / f"{LAW_ID}.md").exists()
+    assert len(git(out, "log", "--format=%h", "main", "--", f"laws/act/{LAW_ID}.md").split()) == 4

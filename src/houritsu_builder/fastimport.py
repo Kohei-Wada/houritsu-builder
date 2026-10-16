@@ -21,7 +21,8 @@ class Stream:
         raw = text.encode()
         self.out.write(b"data %d\n" % len(raw) + raw + b"\n")
 
-    def commit(self, ref: str, date: str, message: str, files: dict[str, str], from_ref: str | None = None) -> int:
+    def commit(self, ref: str, date: str, message: str, files: dict[str, str], from_ref: str | None = None,
+               deleted: set[str] = frozenset()) -> int:
         self.mark += 1
         ts = jst_midnight(date)
         self.out.write(f"commit {ref}\nmark :{self.mark}\nauthor {AUTHOR} {ts} +0900\ncommitter {COMMITTER} {ts} +0900\n".encode())
@@ -29,6 +30,8 @@ class Stream:
         if from_ref:
             parent = f":{self.marks[from_ref]}" if from_ref in self.marks else from_ref
             self.out.write(f"from {parent}\n".encode())
+        for path in sorted(deleted):
+            self.out.write(f"D {path}\n".encode())
         for path in sorted(files):
             self.out.write(f"M 100644 inline {path}\n".encode())
             self._data(files[path])

@@ -94,6 +94,14 @@ Reads only the cache and rebuilds the whole repository from scratch every time.
 A law's earliest available revision is added in the commit of its own amending law,
 the same as any later revision.
 
+A repeal is a commit like any other. e-Gov lists repealed laws, and the repeal is a
+revision with status `Repeal` whose amending law is the repealing law and whose
+enforcement date is the repeal date. That revision deletes the file in the
+repealing law's commit, so `HEAD` holds only laws in force and `git log -- <file>`
+still shows the whole life of a law. Laws repealed but kept in force for transition
+(`remain_in_force`) are deleted too. A repeal of a law with no earlier revision in
+the data adds nothing, and later `Repeal` revisions of a deleted law are ignored.
+
 ## Repository layout (houritsu)
 
 ```text

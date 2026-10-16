@@ -45,8 +45,11 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
                       {"README.md": _asset("README.md"), ".markdownlint-cli2.yaml": _asset("markdownlint-cli2.yaml")})
         for ref, groups in (("refs/heads/main", main_groups), ("refs/heads/upcoming", upcoming_groups)):
             for i, group in enumerate(groups):
-                changed = {}
+                changed, deleted = {}, set()
                 for r in group.revisions:
+                    if r.repealed:
+                        deleted.add(r.path)
+                        continue
                     xml = base64.b64decode(cache.read(cache.data_path(r.revision_id))["law_full_text"])
                     rendered = render_law(xml)
                     check(xml, rendered.markdown, r.revision_id)
@@ -58,7 +61,7 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
                         target.write_text(changed[r.path])
                     files += 1
                 from_ref = "refs/heads/main" if ref.endswith("upcoming") and i == 0 else None
-                stream.commit(ref, group.commit_date, group.message(), changed, from_ref=from_ref)
+                stream.commit(ref, group.commit_date, group.message(), changed, from_ref=from_ref, deleted=deleted)
         stream.done()
     except BaseException as e:
         proc.kill()

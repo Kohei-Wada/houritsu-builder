@@ -50,6 +50,37 @@ def test_message_format():
     )
 
 
+def test_repeal_is_kept_once_and_marked_in_message():
+    main, _ = plan([
+        rev("A", "Y", "2020-04-01"),
+        rev("A", "Z", "2021-04-01", status="Repeal"),
+        rev("A", "W", "2022-04-01", status="Repeal"),
+        rev("B", "Z", "2021-04-01", title="乙法"),
+    ])
+    assert [(g.amendment_law_id, [(r.law_id, r.repealed) for r in g.revisions]) for g in main] == [
+        ("Y", [("A", False)]), ("Z", [("A", True), ("B", False)])]
+    assert "- 法（A号）（廃止）\n- 乙法（B号）\n" in main[1].message()
+
+
+def test_repeal_of_law_never_seen_is_dropped():
+    main, _ = plan([rev("A", "Z", "2021-04-01", status="Repeal")])
+    assert main == []
+
+
+def test_repealed_revision_needs_no_text(tmp_path):
+    import shutil
+
+    from conftest import LAW_ID
+    shutil.copytree(FIXTURE_CACHE, tmp_path / "c")
+    cache = Cache(tmp_path / "c")
+    doc = cache.read(cache.revisions_path(LAW_ID))
+    doc["revisions"].insert(0, dict(doc["revisions"][0], law_revision_id=f"{LAW_ID}_20300101_999AC0000000001",
+                                    amendment_enforcement_date="2030-01-01", current_revision_status="Repeal"))
+    cache.write(cache.revisions_path(LAW_ID), doc)
+    revisions, excluded, skipped = load_revisions(cache)
+    assert len(revisions) == 4 and excluded == [] and skipped == []
+
+
 def test_fixture_loads_three_revisions():
     revisions, excluded, skipped = load_revisions(Cache(FIXTURE_CACHE), law_type="Act")
     assert len(revisions) == 3 and excluded == [] and skipped == []
