@@ -80,7 +80,7 @@ def _flaky(first):
 
 @pytest.mark.parametrize("first", [
     http.client.IncompleteRead(b""),
-    b"\xff\xfe",
+    b"\xff\xff{",
     urllib.error.HTTPError("https://x/laws", 500, "err", {}, None),
 ])
 def test_transient_failures_are_retried(first):
