@@ -14,8 +14,6 @@ class FidelityError(Exception):
 
 
 def _walk(el: ET.Element, out: list[str]) -> None:
-    if el.tag in SKIPPED_TAGS:
-        return
     children = list(el)
     if el.tag == "Article":  # rendered as title then caption
         caption = el.find("ArticleCaption")
@@ -31,7 +29,12 @@ def _walk(el: ET.Element, out: list[str]) -> None:
 
 def xml_text(xml: bytes) -> str:
     out: list[str] = []
-    _walk(ET.fromstring(xml).find("LawBody"), out)
+    body = ET.fromstring(xml).find("LawBody")
+    out.append(body.text or "")
+    for c in body:
+        if c.tag not in SKIPPED_TAGS:
+            _walk(c, out)
+        out.append(c.tail or "")
     return strip_ascii_ws("".join(out))
 
 

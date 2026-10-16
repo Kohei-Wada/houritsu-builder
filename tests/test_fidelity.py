@@ -38,3 +38,11 @@ def test_sup_sub_tags_are_ignored():
     check(xml, "A<sup>2</sup>B<sub>1</sub>\n", "t")
     with pytest.raises(FidelityError):
         check(xml, "A<sup>3</sup>B<sub>1</sub>\n", "t")
+
+
+def test_toc_quoted_in_a_sentence_is_text_but_top_level_toc_is_skipped():
+    xml = ("<Law><LawBody><LawTitle>法</LawTitle><TOC><TOCLabel>目次</TOCLabel></TOC><MainProvision><Paragraph><ParagraphNum/>"
+           "<ParagraphSentence><Sentence>「<QuoteStruct><TOC><TOCChapter><ChapterTitle>第一章　総則</ChapterTitle></TOCChapter></TOC>"
+           "</QuoteStruct>」に改める。</Sentence></ParagraphSentence></Paragraph></MainProvision></LawBody></Law>").encode()
+    assert xml_text(xml) == "法「第一章　総則」に改める。"
+    check(xml, render_law(xml).markdown, "t")
