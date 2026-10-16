@@ -46,7 +46,7 @@ class Revision:
 
     @property
     def path(self) -> str:
-        return f"laws/{kebab(self.law_type)}/{self.law_id}.md"
+        return f"laws/{kebab(self.law_type.split(',')[0])}/{self.law_id[:3]}/{self.law_id}.md"
 
 
 @dataclass

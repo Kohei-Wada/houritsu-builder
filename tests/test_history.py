@@ -16,6 +16,12 @@ def test_kebab():
     assert [kebab(t) for t in ("Act", "CabinetOrder", "MinisterialOrdinance")] == ["act", "cabinet-order", "ministerial-ordinance"]
 
 
+def test_path_shards_by_era_year_and_uses_first_law_type():
+    r = Revision("415AC0000000057", "", "Act", {}, {})
+    assert r.path == "laws/act/415/415AC0000000057.md"
+    assert Revision("322AC0000000067", "", "Act,CabinetOrder", {}, {}).path == "laws/act/322/322AC0000000067.md"
+
+
 def test_one_amending_law_changing_two_laws_is_one_commit():
     main, upcoming = plan([rev("B", "Z", "2021-04-01"), rev("A", "Z", "2021-04-01"), rev("A", "Y", "2020-04-01")])
     assert [(g.amendment_law_id, [r.law_id for r in g.revisions]) for g in main] == [("Y", ["A"]), ("Z", ["A", "B"])]

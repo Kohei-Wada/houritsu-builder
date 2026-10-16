@@ -25,12 +25,12 @@ def test_builds_history_from_fixture(cache, tmp_path):
     assert len(subjects) == 4  # root + 3 amendments
     assert subjects[-1].endswith("リポジトリの初期化")
     assert [s.split()[0] for s in subjects[:3]] == ["2020-01-01", "2019-05-01", "2016-01-01"]
-    md = git(out, "show", "main:laws/act/323AC1000000178.md")
+    md = git(out, "show", "main:laws/act/323/323AC1000000178.md")
     assert md.startswith('---\nlaw_id: "323AC1000000178"\n')
     assert "# 国民の祝日に関する法律" in md
     assert report["commits_main"] == 3 and report["excluded"] == [] and report["skipped"] == []
     assert subprocess.run(["git", "rev-parse", "--verify", "-q", "upcoming"], cwd=out).returncode != 0
-    assert (out / "laws" / "act" / "323AC1000000178.md").exists()  # working tree checked out
+    assert (out / "laws" / "act" / "323" / "323AC1000000178.md").exists()  # working tree checked out
 
 
 def test_build_is_deterministic(cache, tmp_path):
@@ -152,5 +152,5 @@ def test_repeal_removes_the_file(cache, tmp_path):
     assert report["commits_main"] == 4
     assert git(out, "log", "-1", "--format=%s", "main") == "国民の祝日に関する法律を廃止する法律 施行\n"
     assert git(out, "ls-tree", "-r", "--name-only", "main", "laws") == ""
-    assert not (out / "laws" / "act" / f"{LAW_ID}.md").exists()
-    assert len(git(out, "log", "--format=%h", "main", "--", f"laws/act/{LAW_ID}.md").split()) == 4
+    assert not (out / "laws" / "act" / "323" / f"{LAW_ID}.md").exists()
+    assert len(git(out, "log", "--format=%h", "main", "--", f"laws/act/323/{LAW_ID}.md").split()) == 4

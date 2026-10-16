@@ -106,7 +106,7 @@ the data adds nothing, and later `Repeal` revisions of a deleted law are ignored
 
 ```text
 laws/
-  act/415AC0000000057.md
+  act/415/415AC0000000057.md
   cabinet-order/…
   ministerial-ordinance/…
   constitution/  rule/  …
@@ -114,7 +114,10 @@ README.md
 .markdownlint-cli2.yaml
 ```
 
-- Directory: the e-Gov `law_type`, lower-kebab-cased.
+- Directory: the e-Gov `law_type`, lower-kebab-cased (the first type when e-Gov lists
+  several, e.g. `Act,CabinetOrder`), then the first 3 characters of the law ID: the era
+  and year of promulgation (`415` = 平成15年). GitHub lists at most 1,000 files per
+  directory; this keeps every directory under about 220.
 - File name: the e-Gov law ID. Titles can change on amendment; the ID does not.
 - README holds an index table of title → path for people looking up by title.
 
