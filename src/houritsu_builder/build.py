@@ -61,7 +61,7 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
                         target.write_text(changed[r.path])
                     files += 1
                 from_ref = "refs/heads/main" if ref.endswith("upcoming") and i == 0 else None
-                stream.commit(ref, group.commit_date, group.message(), changed, from_ref=from_ref, deleted=deleted)
+                stream.commit(ref, group.commit_date, group.message(), changed, from_ref=from_ref, deleted=deleted, author=group.author)
         stream.done()
     except BaseException as e:
         proc.kill()

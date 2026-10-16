@@ -178,7 +178,9 @@ Enforced: 2027-01-17
 
 - The last two lines are git trailers (`git log --format='%(trailers)'`) for tools.
 - Author and committer dates: enforcement date, 00:00 +09:00.
-- Author: `e-Gov 法令データ`; committer: `houritsu-builder`.
+- Author: the amending law's number with an empty email (`令和八年法律第五十六号 <>`), so
+  `git shortlog` groups by amending law; committer: `houritsu-builder`. No address
+  implies e-Gov wrote the commit; the source is credited in the README and frontmatter.
 
 ## Quality checks
 

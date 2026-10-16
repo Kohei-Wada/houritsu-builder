@@ -41,6 +41,12 @@ def test_unknown_enforcement_date_goes_upcoming():
     assert g.message().endswith("Amendment-Law-Id: Z\nEnforced: unknown\n")
 
 
+def test_author_is_the_amending_law_number():
+    assert plan([rev("A", "Z", "2021-04-01")])[0][0].author == "Z号"
+    first = Revision("A", "平成元年法律第一号", "Act", {}, {"law_revision_id": "A_x", "amendment_enforcement_date": "2020-01-01"})
+    assert plan([first])[0][0].author == "平成元年法律第一号"
+
+
 def test_message_format():
     g = plan([rev("B", "Z", "2027-01-17", promulgated="2026-07-17", title="乙法"), rev("A", "Z", "2027-01-17", promulgated="2026-07-17", title="甲法")])[0][0]
     assert g.message() == (

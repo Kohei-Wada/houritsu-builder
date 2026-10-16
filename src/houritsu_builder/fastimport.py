@@ -1,7 +1,6 @@
 import datetime
 from typing import BinaryIO
 
-AUTHOR = "e-Gov 法令データ <noreply@laws.e-gov.go.jp>"
 COMMITTER = "houritsu-builder <houritsu-builder@users.noreply.github.com>"
 _JST = datetime.timezone(datetime.timedelta(hours=9))
 
@@ -22,10 +21,10 @@ class Stream:
         self.out.write(b"data %d\n" % len(raw) + raw + b"\n")
 
     def commit(self, ref: str, date: str, message: str, files: dict[str, str], from_ref: str | None = None,
-               deleted: set[str] = frozenset()) -> int:
+               deleted: set[str] = frozenset(), author: str | None = None) -> int:
         self.mark += 1
         ts = jst_midnight(date)
-        self.out.write(f"commit {ref}\nmark :{self.mark}\nauthor {AUTHOR} {ts} +0900\ncommitter {COMMITTER} {ts} +0900\n".encode())
+        self.out.write(f"commit {ref}\nmark :{self.mark}\nauthor {f"{author} <>" if author else COMMITTER} {ts} +0900\ncommitter {COMMITTER} {ts} +0900\n".encode())
         self._data(message)
         if from_ref:
             parent = f":{self.marks[from_ref]}" if from_ref in self.marks else from_ref

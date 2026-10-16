@@ -64,6 +64,11 @@ class Group:
         first = self.revisions[0]
         return self.enforced or first.promulgated or "1970-01-02"
 
+    @property
+    def author(self) -> str:
+        first = self.revisions[0]
+        return first.rev.get("amendment_law_num") or (first.law_num if first.amendment_law_id == first.law_id else first.amendment_law_id)
+
     def message(self) -> str:
         first = self.revisions[0].rev
         title = first.get("amendment_law_title") or self.revisions[0].title

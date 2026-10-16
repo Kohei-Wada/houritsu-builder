@@ -12,13 +12,15 @@ def test_jst_midnight():
 def test_stream_imports_into_git(tmp_path):
     buf = io.BytesIO()
     s = Stream(buf)
-    s.commit("refs/heads/main", "2017-03-01", "初版\n", {"laws/act/A.md": "# 法\n"})
-    s.commit("refs/heads/upcoming", "2027-01-17", "改正\n", {"laws/act/A.md": "# 法　改\n"}, from_ref="refs/heads/main")
+    s.commit("refs/heads/main", "2017-03-01", "初版\n", {"laws/act/A.md": "# 法\n"}, author="平成十五年法律第五十七号")
+    s.commit("refs/heads/upcoming", "2027-01-17", "改正\n", {"laws/act/A.md": "# 法　改\n"}, from_ref="refs/heads/main",
+             author="令和八年法律第五十六号")
     s.done()
     subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
     subprocess.run(["git", "fast-import", "--quiet", "--done"], cwd=tmp_path, input=buf.getvalue(), check=True)
-    log = subprocess.run(["git", "log", "--format=%an|%ad|%s", "--date=iso", "upcoming"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout
-    assert log.splitlines() == ["e-Gov 法令データ|2027-01-17 00:00:00 +0900|改正", "e-Gov 法令データ|2017-03-01 00:00:00 +0900|初版"]
+    log = subprocess.run(["git", "log", "--format=%an|%ae|%cn|%ad|%s", "--date=iso", "upcoming"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout
+    assert log.splitlines() == ["令和八年法律第五十六号||houritsu-builder|2027-01-17 00:00:00 +0900|改正",
+                              "平成十五年法律第五十七号||houritsu-builder|2017-03-01 00:00:00 +0900|初版"]
     show = subprocess.run(["git", "show", "main:laws/act/A.md"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout
     assert show == "# 法\n"
 
