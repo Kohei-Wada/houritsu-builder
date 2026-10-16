@@ -143,6 +143,7 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
             lint_dir.mkdir(parents=True)
         files = _stream(cache, staging, main_groups, upcoming_groups, lint_dir if lint else None, unknown, jobs)
         subprocess.run(["git", "reset", "-q", "--hard", "main"], cwd=staging, check=True)
+        subprocess.run(["git", "repack", "-adq"], cwd=staging, check=True)  # loose blobs → one delta-compressed pack
 
         report = {
             "commits_main": len(main_groups),
