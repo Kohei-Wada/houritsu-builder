@@ -47,3 +47,17 @@ def test_404_is_not_retried():
     with pytest.raises(ApiError, match="404"):
         client.get_json("law_data/x")
     assert len(attempts) == 1
+
+
+def test_give_up_keeps_last_error_and_skips_final_backoff():
+    last = urllib.error.URLError("down")
+
+    def opener(url):
+        raise last
+
+    sleeps = []
+    client = Client(base="https://x", delay=1.0, retries=2, opener=opener, sleep=sleeps.append)
+    with pytest.raises(ApiError) as exc:
+        client.get_json("laws")
+    assert exc.value.__cause__ is last
+    assert sleeps == [2.0]

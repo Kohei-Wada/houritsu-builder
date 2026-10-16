@@ -36,6 +36,7 @@ class Client:
         url = f"{self.base}/{path}"
         if params:
             url += "?" + urllib.parse.urlencode(params)
+        last: Exception | None = None
         for attempt in range(self.retries):
             try:
                 body = self.opener(url)
@@ -43,10 +44,12 @@ class Client:
             except urllib.error.HTTPError as e:
                 if e.code == 404:
                     raise ApiError(f"404 {url}") from e
-            except (OSError, json.JSONDecodeError):
-                pass
+                last = e
+            except (OSError, json.JSONDecodeError) as e:
+                last = e
             else:
                 self.sleep(self.delay)
                 return value
-            self.sleep(self.delay * 2 ** (attempt + 1))
-        raise ApiError(f"gave up after {self.retries} attempts: {url}")
+            if attempt < self.retries - 1:
+                self.sleep(self.delay * 2 ** (attempt + 1))
+        raise ApiError(f"gave up after {self.retries} attempts: {url}") from last
