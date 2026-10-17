@@ -105,7 +105,9 @@ mod tests {
     use serde_json::json;
     use std::sync::{Arc, Mutex};
 
-    fn client(retries: u32, responses: Vec<Result<Vec<u8>, HttpError>>) -> (Client, Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<f64>>>) {
+    type Log<T> = Arc<Mutex<Vec<T>>>;
+
+    fn client(retries: u32, responses: Vec<Result<Vec<u8>, HttpError>>) -> (Client, Log<String>, Log<f64>) {
         let calls = Arc::new(Mutex::new(vec![]));
         let sleeps = Arc::new(Mutex::new(vec![]));
         let queue = Mutex::new(responses.into_iter());
