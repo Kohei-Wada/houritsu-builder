@@ -44,7 +44,13 @@ e-Gov law API v2 (`https://laws.e-gov.go.jp/api/2`), no key required. Verified o
   The Personal Information Protection Act had 35 revisions back to 2017-03-01,
   including two scheduled for 2027 and 2028.
 - `GET /law_data/{law_revision_id}?law_full_text_format=xml&response_format=json`
-  returns the full text of one revision as base64 XML.
+  returns the full text of one revision as base64 XML. The API spec marks the JSON
+  responses of the full-text endpoints as provisional (試行版), so a format change there
+  fails the build; the XML bulk download has no revision history, so it is no substitute.
+- An amendment whose enforcement day is not fixed is dated 2117-12-30 or 2117-12-31, and
+  `amendment_enforcement_comment` words the day (政令で定める日 etc.). 616 revisions have a
+  comment on 2026-10-17, all `UnEnforced`; for the 580 with a real date, the date is
+  e-Gov's estimate (the latest day the law allows).
 
 Sampled size (60 random laws): mean 5.1 revisions per law (median 2,
 max 52), about 49,000 revisions in total, mean 100 KiB per revision, about 4.7 GiB
@@ -82,7 +88,8 @@ requests. Measured on 2026-10-17: responses take 0.1–0.2 s, so the single 1 s-
 client first used was ~90 % sleep; one worker at 0.1 s gave 110 revisions/min, four gave
 only 175/min while e-Gov's empty-body failures rose from about 0.2 % to 1 %. Failures
 are retried with exponential backoff from 2 s; revisions that still fail are recorded
-and retried on the next run.
+and retried on the next run. Requests carry `User-Agent: houritsu-builder/<version>` and
+the builder's URL.
 
 A run refetches a law's revision list only when it may have changed: the law is new,
 the newest revision as of now or as of 2099-12-31 (`/laws?asof=`) is not in the cached
@@ -101,8 +108,15 @@ build, keyed by the revision's data file and metadata and by a hash of the sourc
 depends on (render, fidelity, frontmatter, build, the rumdl config, `Cargo.lock`) and
 the rumdl version, so a fetch-only change keeps them. A revision whose key is unchanged takes its blob from the
 previous repository (borrowed through git alternates, then copied in by `git repack -a`)
-and is neither rendered nor linted again. Workers write new blobs as loose objects, so
-`git fast-import` only builds trees and commits.
+and is neither rendered nor linted again. A damaged `rendered.json` only costs a full
+render (it is written by rename, and an unreadable one is ignored). Workers write new
+blobs as loose objects, so `git fast-import` only builds trees and commits.
+
+A law with a revision whose text a fetch failed to get (other than with 404) fails the
+build, so a bad fetch keeps the published history instead of dropping the law. A
+revision e-Gov answers with 404 is skipped: the next revision of that law names it in a
+`Skipped-Revision` trailer, since its diff covers both (18 revisions of 5 laws on
+2026-10-17).
 
 1. Group revisions by amending law and enforcement date. One group is one commit:
    "this amending law came into force on this date and changed these files".
@@ -176,10 +190,16 @@ source: https://laws.e-gov.go.jp/law/415AC0000000057
 ---
 ```
 
+An amendment not yet dated has `enforced: "undetermined"` instead of e-Gov's 2117 placeholder.
+When e-Gov words the day, `enforcement_comment: 政令で定める日…` follows `enforced`.
+
 Keys are stable across builds; tools may rely on them.
 
 ### Body
 
+- The table of contents (`TOC`, in 24% of laws) is left out: it only repeats the
+  headings. The fidelity check leaves out the same, from its own list, so the renderer
+  dropping anything else still fails it.
 - Part, chapter, section and subsection titles become headings. Articles become
   headings of the form `第一条（目的）`. Heading depth follows each law's own
   structure and always increases one level at a time (rumdl MD001).
@@ -194,7 +214,10 @@ Keys are stable across builds; tools may rely on them.
   download). About 3 in 10 `Fig`s have an empty `src` in e-Gov's data; those get the line
   `（図：e-Gov に画像なし）` so the gap is visible (issue #4), and are counted. 様式・書式・注記 containers (`StyleStruct` etc.) render part by part instead of as one
   paragraph; almost all 様式 are figures.
-- The fidelity check strips the table tags and skips the figure lines (links and the mark).
+- A figure inside a sentence or a table cell (a symbol, a drawing in a 別表; 8,300 in the
+  newest revisions of 160 laws) is an HTML link, `<a href="…">name</a>`, or the mark.
+- The fidelity check strips the table tags and skips the figure lines, inline links and
+  marks.
 - A 附則 of an amending law is headed with that law's number as e-Gov shows it,
   `## 附　則（平成一九年三月三一日法律第二三号）`, from the XML's `AmendLawNum`; the law's own
   附則 has none. Without it all 160,580 附則 headings were the same string.
@@ -217,6 +240,9 @@ Enforced: 2027-01-17
 ```
 
 - The last two lines are git trailers (`git log --format='%(trailers)'`) for tools.
+- `施行日` adds e-Gov's wording of the day when it has one: `施行日: 未定（政令で定める日）`,
+  with `Enforced: undetermined`. Such a commit is dated 2117-12-31 and so is last on
+  `upcoming`.
 - An amending Act also gets `Bill: 閣法 第221回国会 第54号` and `Bill-Url:` (the bill's text
   page on the House of Representatives site), matched by law number through the bill
   database by smartnews-smri (MIT), cached by `fetch`. Only the link: the bill's 理由
@@ -225,8 +251,8 @@ Enforced: 2027-01-17
   database starts around 1998, so older ones do not.
 - Author and committer dates: enforcement date, 00:00 +09:00. git rejects dates before 1970
   (`git commit` refuses them; a negative time from fast-import fails `git fsck` with
-  `badDate`, checked with git 2.56 on 2026-10-17), so earlier dates become 1970-01-02;
-  the `Enforced` trailer and frontmatter keep the real date.
+  `badDate`, checked with git 2.56 on 2026-10-17), so earlier dates become 1970-01-02
+  00:00 +09:00; the `Enforced` trailer and frontmatter keep the real date.
 - Author: the amending law's number with an empty email (`令和八年法律第五十六号 <>`), so
   `git shortlog` groups by amending law; committer: `houritsu-builder`. No address
   implies e-Gov wrote the commit; the source is credited in the README and frontmatter.
@@ -277,8 +303,9 @@ Each check runs in tests and on every build; any failure fails the build.
    https://laws.e-gov.go.jp/terms/). It requires a source line, a statement that the data
    was edited and by whom, and not presenting the result as made by the government. The
    README carries the source line in e-Gov's format, the edit statement, and the 官報
-   disclaimer; houritsu is offered under the same terms. Statute text itself is not
-   copyrighted (著作権法第13条).
+   disclaimer. PDL1.0 is a site's terms, not a license for others to apply, so houritsu
+   is offered under CC BY 4.0, which §1.7 allows (issue #9), with a LICENSE and a
+   no-warranty note. Statute text itself is not copyrighted (著作権法第13条).
 
 ## Open questions
 

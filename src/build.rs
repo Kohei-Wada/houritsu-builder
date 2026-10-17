@@ -22,6 +22,7 @@ use crate::reuse::{self, Entries, Entry};
 
 const MARKER: &str = ".git/houritsu-build";
 const README: &str = include_str!("../assets/README.md");
+const LICENSE: &str = include_str!("../assets/LICENSE");
 // git's built-in markdown diff driver names the enclosing heading (the article) in hunk headers.
 const GITATTRIBUTES: &str = "*.md diff=markdown\n";
 
@@ -252,6 +253,7 @@ fn stream(
             message: "リポジトリの初期化\n",
             files: BTreeMap::from([
                 ("README.md".to_string(), README.to_string()),
+                ("LICENSE".to_string(), LICENSE.to_string()),
                 (".rumdl.toml".to_string(), lint::CONFIG.to_string()),
                 (".gitattributes".to_string(), GITATTRIBUTES.to_string()),
             ]),
@@ -277,7 +279,9 @@ fn stream(
                     for (k, n) in &found {
                         *out.unknown.entry(k.clone()).or_default() += n;
                     }
-                    blobs.insert(r.path(), sha.clone());
+                    if blobs.insert(r.path(), sha.clone()).is_some() {
+                        bail!("two revisions of {} in one commit", r.path());
+                    }
                     out.entries.insert(
                         r.revision_id().to_string(),
                         (keys[r.revision_id()].clone(), sha, found),
@@ -349,6 +353,14 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
             )?;
         }
         let loaded = load_revisions(cache, o.law_type.as_deref())?;
+        if !loaded.excluded.is_empty() {
+            // a fetch failed: publishing now would drop these laws until the next fetch
+            bail!(
+                "{} laws miss revision text that a fetch may still get: {}",
+                loaded.excluded.len(),
+                loaded.excluded.join(" ")
+            );
+        }
         let (main, upcoming) = plan(loaded.revisions);
         let bills = Bills::load(cache)?;
         let history = History {
@@ -477,6 +489,26 @@ mod tests {
             sh(&d.path().join("a"), &["rev-parse", "main"]),
             sh(&d.path().join("b"), &["rev-parse", "main"])
         );
+    }
+
+    #[test]
+    fn law_whose_text_failed_to_fetch_fails_the_build_and_keeps_the_previous_one() {
+        let (d, cache) = fixture_cache();
+        let out = d.path().join("out");
+        build(&cache, &out, &opts(false, 1)).unwrap();
+        let before = sh(&out, &["rev-parse", "main"]);
+        let rid = cache.read(&cache.revisions_path(LAW_ID)).unwrap()["revisions"][0]
+            ["law_revision_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        fs::remove_file(cache.data_path(&rid)).unwrap();
+        assert!(build(&cache, &out, &opts(false, 1))
+            .unwrap_err()
+            .to_string()
+            .contains(LAW_ID));
+        assert_eq!(sh(&out, &["rev-parse", "main"]), before);
+        assert!(!d.path().join("out.building").exists());
     }
 
     #[test]
