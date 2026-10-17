@@ -135,11 +135,16 @@ class _Renderer:
                 self.fallback(child, "  " * depth)
 
     def list_(self, el: ET.Element, depth: int) -> None:
+        nested = depth + 1
         for child in el:
             if child.tag.endswith("Sentence"):
-                self.block(("  " * depth + "- " + literal(self.sentence(child))).rstrip(" "))
+                text = self.sentence(child)
+                if not text and any(c.tag.startswith("Sublist") for c in el):
+                    nested = depth  # as with an empty item, the sublists take its place
+                    continue
+                self.block(("  " * depth + "- " + literal(text)).rstrip(" "))
             elif child.tag.startswith("Sublist"):
-                self.list_(child, depth + 1)
+                self.list_(child, nested)
             else:
                 self.fallback(child)
 

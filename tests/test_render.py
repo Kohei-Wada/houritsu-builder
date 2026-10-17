@@ -188,3 +188,11 @@ def test_children_of_an_empty_item_take_its_place():
            "<Subitem1><Subitem1Sentence/></Subitem1></Item>"
            "</Paragraph></MainProvision></LawBody></Law>").encode()
     assert render_law(xml).markdown == "本文。\n\n- 一 号。\n\n  - 式\n\n  -\n"
+
+
+def test_sublists_of_an_empty_list_sentence_take_its_place():
+    xml = ("<Law><LawBody><MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>"
+           "<List><ListSentence><Sentence/></ListSentence><Sublist1><Sublist1Sentence><Sentence/></Sublist1Sentence>"
+           "<Sublist2><Sublist2Sentence><Sentence>式</Sentence></Sublist2Sentence></Sublist2></Sublist1></List>"
+           "</Paragraph></MainProvision></LawBody></Law>").encode()
+    assert render_law(xml).markdown == "本文。\n\n- 式\n"
