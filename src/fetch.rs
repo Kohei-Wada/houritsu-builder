@@ -10,20 +10,39 @@ use crate::cache::Cache;
 
 const FUTURE: &str = "2099-12-31"; // asof this date, a law's revision_info is its newest revision, enforced or not
 
+const PAGES_AT_ONCE: usize = 4; // a page takes 1.5–3 s; four at once took 2.2 s on 2026-10-17
+
+fn law_page(client: &dyn Api, offset: usize, params: &[(&str, &str)]) -> Result<Value, ApiError> {
+    let offset = offset.to_string();
+    let mut all = vec![("limit", "1000"), ("offset", offset.as_str()), ("response_format", "json")];
+    all.extend_from_slice(params);
+    client.get_json("laws", &all)
+}
+
+/// All pages of `/laws`: the first gives the total, the rest are fetched a few at a time.
 pub fn fetch_law_list(client: &dyn Api, params: &[(&str, &str)]) -> Result<Vec<Value>, ApiError> {
-    let mut laws = vec![];
-    loop {
-        let offset = laws.len().to_string();
-        let mut all = vec![("limit", "1000"), ("offset", offset.as_str()), ("response_format", "json")];
-        all.extend_from_slice(params);
-        let page = client.get_json("laws", &all)?;
-        let got = page["laws"].as_array().cloned().unwrap_or_default();
-        let empty = got.is_empty();
-        laws.extend(got);
-        if empty || laws.len() as u64 >= page["total_count"].as_u64().unwrap_or(0) {
-            return Ok(laws);
-        }
+    let first = law_page(client, 0, params)?;
+    let mut laws = first["laws"].as_array().cloned().unwrap_or_default();
+    let (stride, total) = (laws.len(), first["total_count"].as_u64().unwrap_or(0) as usize);
+    if stride == 0 || laws.len() >= total {
+        return Ok(laws);
     }
+    let offsets: Vec<usize> = (stride..total).step_by(stride).collect();
+    let pages: Vec<Mutex<Option<Result<Value, ApiError>>>> = offsets.iter().map(|_| Mutex::new(None)).collect();
+    let next = AtomicUsize::new(0);
+    std::thread::scope(|s| {
+        for _ in 0..PAGES_AT_ONCE.min(offsets.len()) {
+            s.spawn(|| loop {
+                let k = next.fetch_add(1, Ordering::Relaxed);
+                let Some(&offset) = offsets.get(k) else { return };
+                *pages[k].lock().unwrap() = Some(law_page(client, offset, params));
+            });
+        }
+    });
+    for page in pages {
+        laws.extend(page.into_inner().unwrap().unwrap()?["laws"].as_array().cloned().unwrap_or_default());
+    }
+    Ok(laws)
 }
 
 fn law_id(law: &Value) -> String {
@@ -95,16 +114,19 @@ pub fn fetch(client: &dyn Api, cache: &Cache, o: &Options, log: &(dyn Fn(&str) +
     let mut targets: Vec<String> = if !o.law_ids.is_empty() {
         o.law_ids.clone()
     } else {
-        let laws = fetch_law_list(client, &[])?;
+        let (laws, future) = std::thread::scope(|s| {
+            let future = (!o.full).then(|| s.spawn(|| fetch_law_list(client, &[("asof", FUTURE)])));
+            (fetch_law_list(client, &[]), future.map(|f| f.join().unwrap()))
+        });
+        let laws = laws?;
         cache.write(&cache.laws_path(), &Value::Array(laws.clone()))?;
         for l in &laws {
             types.insert(law_id(l), l["law_info"]["law_type"].as_str().unwrap_or_default().to_string());
         }
         let mut targets: Vec<String> =
             laws.iter().map(law_id).filter(|id| o.law_type.is_none_or(|t| t.is_empty() || types[id] == t)).collect();
-        if !o.full {
-            let future: HashMap<String, Value> =
-                fetch_law_list(client, &[("asof", FUTURE)])?.into_iter().map(|l| (law_id(&l), l["revision_info"].clone())).collect();
+        if let Some(future) = future {
+            let future: HashMap<String, Value> = future?.into_iter().map(|l| (law_id(&l), l["revision_info"].clone())).collect();
             let current: HashMap<String, Value> = laws.iter().map(|l| (law_id(l), l["revision_info"].clone())).collect();
             let (today, not_found) = (today_jst(), cache.not_found()?);
             let mut kept = vec![];
@@ -269,6 +291,21 @@ mod tests {
         )]);
         let ids: Vec<String> = fetch_law_list(&fake, &[]).unwrap().iter().map(law_id).collect();
         assert_eq!(ids, ["A", "B", "C"]);
+    }
+
+    #[test]
+    fn law_list_pages_fetched_at_once_keep_their_order() {
+        let fake = Fake::new(vec![(
+            "laws",
+            Box::new(|p| {
+                let offset: usize = p["offset"].parse().unwrap();
+                let ids: Vec<Value> = (offset..(offset + 2).min(11)).map(|n| law(&format!("L{n:02}"), "Act")).collect();
+                Ok(json!({"total_count": 11, "laws": ids}))
+            }),
+        )]);
+        let ids: Vec<String> = fetch_law_list(&fake, &[]).unwrap().iter().map(law_id).collect();
+        assert_eq!(ids, (0..11).map(|n| format!("L{n:02}")).collect::<Vec<_>>());
+        assert_eq!(fake.calls().len(), 6);
     }
 
     #[test]
