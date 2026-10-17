@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::BufWriter;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context};
@@ -17,7 +17,8 @@ use crate::frontmatter::frontmatter;
 use crate::history::{load_revisions, plan, Group, Revision};
 use crate::render::{parse, render_doc, Counts};
 use crate::reuse::{self, Entries, Entry};
-use crate::{git, lint};
+use crate::git;
+use crate::lint::{self, Linter};
 
 const MARKER: &str = ".git/houritsu-build";
 const README: &str = include_str!("../assets/README.md");
@@ -26,8 +27,8 @@ pub struct Options {
     pub law_type: Option<String>,
     pub lint: bool,
     pub jobs: usize,
-    /// The linter command; tests point it at a fake.
-    pub rumdl: Vec<String>,
+    /// A rumdl config to lint with instead of the shipped one; tests use a stricter one.
+    pub lint_config: Option<String>,
     /// Stands in for the hash of the rendering sources; tests use it to change the code version.
     pub code_version: Option<String>,
 }
@@ -38,7 +39,7 @@ impl Default for Options {
             law_type: None,
             lint: true,
             jobs: std::thread::available_parallelism().map_or(1, |n| n.get()),
-            rumdl: lint::RUMDL.iter().map(|s| s.to_string()).collect(),
+            lint_config: None,
             code_version: None,
         }
     }
@@ -102,12 +103,18 @@ fn prepare(staging: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+struct Rendered {
+    sha: String,
+    unknown: Counts,
+    warnings: Vec<String>,
+}
+
 fn render(
     cache: &Cache,
     objects: &Path,
     r: &Revision,
-    lint_file: Option<&Path>,
-) -> anyhow::Result<(String, Counts)> {
+    linter: Option<&Linter>,
+) -> anyhow::Result<Rendered> {
     #[derive(serde::Deserialize)]
     struct Data<'a> {
         #[serde(borrow)]
@@ -126,25 +133,30 @@ fn render(
     let rendered = render_doc(&doc).with_context(|| r.revision_id().to_string())?;
     check_doc(&doc, &rendered.markdown, r.revision_id())?;
     let text = frontmatter(&r.law_info, &r.rev) + &rendered.markdown;
-    if let Some(f) = lint_file {
-        fs::create_dir_all(f.parent().unwrap())?;
-        fs::write(f, &text)?;
-    }
-    Ok((write_blob(objects, text.as_bytes())?, rendered.unknown))
+    let warnings = match linter {
+        Some(l) => l.check(&format!("{}/{}.md", r.path().trim_end_matches(".md"), r.revision_id()), &text)?,
+        None => vec![],
+    };
+    Ok(Rendered {
+        sha: write_blob(objects, text.as_bytes())?,
+        unknown: rendered.unknown,
+        warnings,
+    })
 }
 
 fn render_all(
     cache: &Cache,
     objects: &Path,
-    todo: &[(&Revision, Option<PathBuf>)],
+    todo: &[&Revision],
+    linter: Option<&Linter>,
     jobs: usize,
-) -> anyhow::Result<Vec<(String, Counts)>> {
+) -> anyhow::Result<Vec<Rendered>> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(jobs.max(1))
         .build()?;
     pool.install(|| {
         todo.par_iter()
-            .map(|(r, lint)| render(cache, objects, r, lint.as_deref()))
+            .map(|r| render(cache, objects, r, linter))
             .collect()
     })
 }
@@ -167,7 +179,7 @@ fn stream(
     cache: &Cache,
     staging: &Path,
     history: &History,
-    lint_dir: Option<&Path>,
+    linter: Option<&Linter>,
     jobs: usize,
     previous: &HashMap<String, Entry>,
 ) -> anyhow::Result<Streamed> {
@@ -195,20 +207,16 @@ fn stream(
                 .map(|e| (r.revision_id(), e))
         })
         .collect();
-    let todo: Vec<(&Revision, Option<PathBuf>)> = all
-        .iter()
-        .filter(|r| !hits.contains_key(r.revision_id()))
-        .map(|r| {
-            (
-                *r,
-                lint_dir.map(|d| {
-                    d.join(r.path().trim_end_matches(".md"))
-                        .join(format!("{}.md", r.revision_id()))
-                }),
-            )
-        })
-        .collect();
-    let mut rendered = render_all(cache, &staging.join(".git/objects"), &todo, jobs)?.into_iter();
+    let todo: Vec<&Revision> = all.iter().copied().filter(|r| !hits.contains_key(r.revision_id())).collect();
+    let rendered = render_all(cache, &staging.join(".git/objects"), &todo, linter, jobs)?;
+    let warnings: Vec<&str> = rendered.iter().flat_map(|r| &r.warnings).map(String::as_str).collect();
+    if !warnings.is_empty() {
+        let log = warnings.join("\n") + "\n";
+        fs::write(cache.root.join("lint.log"), &log)?;
+        let head: String = log.chars().take(4000).collect();
+        bail!("rumdl failed (full log: lint.log in cache):\n{head}");
+    }
+    let mut rendered = rendered.into_iter().map(|r| (r.sha, r.unknown));
 
     let mut proc = Command::new("git")
         .args(["fast-import", "--quiet", "--done"])
@@ -301,7 +309,10 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
         .code_version
         .clone()
         .unwrap_or_else(|| reuse::code_version().to_string());
-    let lint_dir = cache.root.join("lint");
+    let linter = match (o.lint, &o.lint_config) {
+        (false, _) => None,
+        (true, config) => Some(Linter::new(config.as_deref().unwrap_or(lint::CONFIG))?),
+    };
     let result = (|| -> anyhow::Result<Report> {
         let previous = if out.join(MARKER).exists() {
             reuse::load(cache, out, &version)?
@@ -320,10 +331,6 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
         }
         let loaded = load_revisions(cache, o.law_type.as_deref())?;
         let (main, upcoming) = plan(loaded.revisions);
-        if o.lint {
-            let _ = fs::remove_dir_all(&lint_dir);
-            fs::create_dir_all(&lint_dir)?;
-        }
         let bills = Bills::load(cache)?;
         let history = History {
             main: &main,
@@ -334,24 +341,13 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
             cache,
             &staging,
             &history,
-            o.lint.then_some(lint_dir.as_path()),
+            linter.as_ref(),
             o.jobs,
             &previous,
         )?;
         git::run(&staging, &["reset", "-q", "--hard", "main"])?;
-        // Loose and borrowed blobs → one delta-compressed pack, while lint runs on the same files.
-        let mut repack = Command::new("git")
-            .args(["repack", "-adq"])
-            .current_dir(&staging)
-            .spawn()?;
-        let linted = if o.lint {
-            Some(lint::run(&lint_dir, &o.rumdl))
-        } else {
-            None
-        };
-        if !repack.wait()?.success() {
-            bail!("git repack failed");
-        }
+        // Loose and borrowed blobs → one delta-compressed pack.
+        git::run(&staging, &["repack", "-adq"])?;
         fs::remove_file(&alternates).or_else(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 Ok(())
@@ -359,7 +355,7 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
                 Err(e)
             }
         })?;
-        let mut report = Report {
+        let report = Report {
             commits_main: main.len(),
             commits_upcoming: upcoming.len(),
             files: streamed.files,
@@ -371,17 +367,8 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
             excluded: loaded.excluded,
             skipped: loaded.skipped,
             unknown: streamed.unknown,
-            lint: "skipped",
+            lint: if o.lint { "ok" } else { "skipped" },
         };
-        if let Some(linted) = linted {
-            let (ok, output) = linted?;
-            if !ok {
-                fs::write(cache.root.join("lint.log"), &output)?;
-                let head: String = output.chars().take(4000).collect();
-                bail!("rumdl failed (full log: lint.log in cache):\n{head}");
-            }
-            report.lint = "ok";
-        }
         git::copy_remote_config(out, &staging)?;
         clear(out)?;
         fs::remove_dir(out)?;
@@ -395,7 +382,6 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
     if result.is_err() {
         let _ = fs::remove_dir_all(&staging);
     }
-    let _ = fs::remove_dir_all(&lint_dir);
     let report = result?;
     fs::create_dir_all(&cache.root)?;
     fs::write(
@@ -522,14 +508,9 @@ mod tests {
         let out = d.path().join("out");
         build(&cache, &out, &opts(false, 1)).unwrap();
         let before = sh(&out, &["rev-parse", "main"]);
-        let fake = [
-            "sh",
-            "-c",
-            "head -c 5000 /dev/zero | tr '\\0' x; exit 1",
-            "rumdl",
-        ];
+        let strict = "[global]\nenable = [\"MD013\"]\n\n[MD013]\nline-length = 10\n";
         let o = Options {
-            rumdl: fake.iter().map(|s| s.to_string()).collect(),
+            lint_config: Some(strict.to_string()),
             ..opts(true, 1)
         };
         assert!(build(&cache, &out, &o)
@@ -537,20 +518,10 @@ mod tests {
             .to_string()
             .contains("rumdl failed"));
         assert_eq!(sh(&out, &["rev-parse", "main"]), before);
-        assert!(!d.path().join("out.building").exists() && !cache.root.join("lint").exists());
-        assert_eq!(
-            fs::read_to_string(cache.root.join("lint.log"))
-                .unwrap()
-                .len(),
-            5000
-        );
-    }
-
-    fn edit_revisions(cache: &Cache, f: impl FnOnce(&mut Vec<Value>)) {
-        let path = cache.revisions_path(LAW_ID);
-        let mut doc = cache.read(&path).unwrap();
-        f(doc["revisions"].as_array_mut().unwrap());
-        cache.write(&path, &doc).unwrap();
+        assert!(!d.path().join("out.building").exists());
+        assert!(fs::read_to_string(cache.root.join("lint.log"))
+            .unwrap()
+            .contains("[MD013]"));
     }
 
     #[test]

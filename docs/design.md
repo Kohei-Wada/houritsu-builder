@@ -67,7 +67,8 @@ houritsu repository  →  GitHub
 
 The builder is Rust (first written in Python; the Rust port produced byte-identical
 history for all 53,432 revisions and renders about 6× faster per core). It has two
-commands. Lint runs the pinned rumdl through `uvx`.
+commands. rumdl, pinned in `Cargo.lock`, runs in-process as a library on each rendered
+revision, so the builder needs nothing but git at run time.
 
 ### fetch
 

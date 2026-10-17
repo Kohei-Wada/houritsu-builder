@@ -10,5 +10,3 @@ cargo build --release
 ```
 
 Design: `docs/design.md`.
-
-Lint runs `uvx rumdl@0.2.79`, so `uv` must be on `PATH`. `cargo test` needs it too.
