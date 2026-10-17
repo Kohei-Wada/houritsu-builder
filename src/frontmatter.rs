@@ -30,7 +30,10 @@ pub fn frontmatter(law_info: &Value, rev: &Value) -> String {
         ("title", rev.get("law_title")),
         ("title_kana", rev.get("law_title_kana")),
         ("abbrev", rev.get("abbrev")),
-        ("law_type", truthy(rev.get("law_type")).or(law_info.get("law_type"))),
+        (
+            "law_type",
+            truthy(rev.get("law_type")).or(law_info.get("law_type")),
+        ),
         ("category", rev.get("category")),
         ("revision_id", Some(&rev["law_revision_id"])),
     ] {
@@ -47,7 +50,10 @@ pub fn frontmatter(law_info: &Value, rev: &Value) -> String {
         out.push(format!("  {k}: {}", v(rev.get(key))));
     }
     out.push(format!("repeal_status: {}", v(rev.get("repeal_status"))));
-    out.push(format!("source: {}", json_str(&format!("https://laws.e-gov.go.jp/law/{law_id}"))));
+    out.push(format!(
+        "source: {}",
+        json_str(&format!("https://laws.e-gov.go.jp/law/{law_id}"))
+    ));
     out.push("---".to_string());
     out.push(String::new());
     out.push(String::new());

@@ -49,11 +49,18 @@ pub fn code_version() -> &'static str {
 fn canonical(v: &Value) -> String {
     match v {
         Value::Object(m) => {
-            let sorted: BTreeMap<&String, String> = m.iter().map(|(k, v)| (k, canonical(v))).collect();
-            let fields: Vec<String> = sorted.into_iter().map(|(k, v)| format!("{}:{v}", Value::String(k.clone()))).collect();
+            let sorted: BTreeMap<&String, String> =
+                m.iter().map(|(k, v)| (k, canonical(v))).collect();
+            let fields: Vec<String> = sorted
+                .into_iter()
+                .map(|(k, v)| format!("{}:{v}", Value::String(k.clone())))
+                .collect();
             format!("{{{}}}", fields.join(","))
         }
-        Value::Array(a) => format!("[{}]", a.iter().map(canonical).collect::<Vec<_>>().join(",")),
+        Value::Array(a) => format!(
+            "[{}]",
+            a.iter().map(canonical).collect::<Vec<_>>().join(",")
+        ),
         other => other.to_string(),
     }
 }
@@ -78,10 +85,16 @@ pub fn load(cache: &Cache, repo: &Path, version: &str) -> anyhow::Result<HashMap
     }
     let entries: HashMap<String, Entry> = serde_json::from_value(doc["entries"].clone())?;
     let present = crate::git::present(repo, entries.values().map(|e| e.1.as_str()))?;
-    Ok(entries.into_iter().filter(|(_, e)| present.contains(&e.1)).collect())
+    Ok(entries
+        .into_iter()
+        .filter(|(_, e)| present.contains(&e.1))
+        .collect())
 }
 
 pub fn save(cache: &Cache, version: &str, entries: &Entries) -> anyhow::Result<()> {
-    fs::write(cache.root.join(FILE), serde_json::to_string(&json!({"version": version, "entries": entries}))?)?;
+    fs::write(
+        cache.root.join(FILE),
+        serde_json::to_string(&json!({"version": version, "entries": entries}))?,
+    )?;
     Ok(())
 }

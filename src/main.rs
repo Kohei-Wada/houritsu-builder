@@ -11,7 +11,10 @@ use houritsu_builder::cache::Cache;
 use houritsu_builder::fetch::{self, fetch};
 
 #[derive(Parser)]
-#[command(name = "houritsu-builder", about = "Builds the houritsu repository: Japanese laws as git history from the e-Gov law API")]
+#[command(
+    name = "houritsu-builder",
+    about = "Builds the houritsu repository: Japanese laws as git history from the e-Gov law API"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Cmd,
@@ -64,15 +67,47 @@ enum Cmd {
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
-        Cmd::Fetch { cache, law_type, law_ids, limit, delay, jobs, full } => {
-            let options = fetch::Options { law_type: law_type.as_deref(), law_ids, limit, jobs, full };
-            let stats = fetch(&Client::new(delay), &Cache::new(cache), &options, &|line| println!("{line}"))?;
+        Cmd::Fetch {
+            cache,
+            law_type,
+            law_ids,
+            limit,
+            delay,
+            jobs,
+            full,
+        } => {
+            let options = fetch::Options {
+                law_type: law_type.as_deref(),
+                law_ids,
+                limit,
+                jobs,
+                full,
+            };
+            let stats = fetch(&Client::new(delay), &Cache::new(cache), &options, &|line| {
+                println!("{line}")
+            })?;
             println!("{}", serde_json::to_string(&stats)?);
         }
-        Cmd::Build { cache, out, law_type, no_lint } => {
-            let report = build(&Cache::new(cache), &out, &build::Options { law_type, lint: !no_lint, ..Default::default() })?;
+        Cmd::Build {
+            cache,
+            out,
+            law_type,
+            no_lint,
+        } => {
+            let report = build(
+                &Cache::new(cache),
+                &out,
+                &build::Options {
+                    law_type,
+                    lint: !no_lint,
+                    ..Default::default()
+                },
+            )?;
             println!("{}", report.to_json(false));
-            println!("unknown elements: {}", serde_json::to_string(&report.to_json(true)["unknown"])?);
+            println!(
+                "unknown elements: {}",
+                serde_json::to_string(&report.to_json(true)["unknown"])?
+            );
         }
     }
     Ok(())

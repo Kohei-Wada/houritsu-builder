@@ -34,7 +34,10 @@ fn walk(el: El, out: &mut String, parent: &str, quoted: bool) {
         // rendered as title then caption
         if let Some(i) = children.iter().position(|c| tag(*c) == "ArticleCaption") {
             let caption = children.remove(i);
-            let at = children.iter().position(|c| tag(*c) == "ArticleTitle").map_or(0, |i| i + 1);
+            let at = children
+                .iter()
+                .position(|c| tag(*c) == "ArticleTitle")
+                .map_or(0, |i| i + 1);
             children.insert(at, caption);
         }
     }
@@ -98,7 +101,9 @@ fn strip_prefix(line: &str) -> &str {
     }
 }
 
-const TAGS: [&str; 8] = ["<ruby>", "</ruby>", "<rt>", "</rt>", "<sup>", "</sup>", "<sub>", "</sub>"];
+const TAGS: [&str; 8] = [
+    "<ruby>", "</ruby>", "<rt>", "</rt>", "<sup>", "</sup>", "<sub>", "</sub>",
+];
 
 fn push_without_tags(line: &str, out: &mut String) {
     let mut rest = line;
@@ -135,9 +140,22 @@ pub fn check_doc(doc: &roxmltree::Document, md: &str, label: &str) -> anyhow::Re
         return Ok(());
     }
     let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
-    let i = a.iter().zip(&b).position(|(x, y)| x != y).unwrap_or(a.len().min(b.len()));
-    let around = |s: &[char]| -> String { s[i.saturating_sub(20).min(s.len())..(i + 20).min(s.len())].iter().collect() };
-    Err(FidelityError(format!("{label}: text mismatch at char {i}: xml={:?} md={:?}", around(&a), around(&b))).into())
+    let i = a
+        .iter()
+        .zip(&b)
+        .position(|(x, y)| x != y)
+        .unwrap_or(a.len().min(b.len()));
+    let around = |s: &[char]| -> String {
+        s[i.saturating_sub(20).min(s.len())..(i + 20).min(s.len())]
+            .iter()
+            .collect()
+    };
+    Err(FidelityError(format!(
+        "{label}: text mismatch at char {i}: xml={:?} md={:?}",
+        around(&a),
+        around(&b)
+    ))
+    .into())
 }
 
 #[cfg(test)]
@@ -153,8 +171,17 @@ mod tests {
     #[test]
     fn prefixes_match_the_original_regex() {
         for (line, want) in [
-            ("# 法", "法"), ("###### 条", "条"), ("####### 条", "####### 条"), ("#法", "#法"), ("- 一", "一"), ("    - 二", "二"),
-            ("-", ""), ("  -", ""), ("-x", "-x"), ("本文", "本文"), ("", ""),
+            ("# 法", "法"),
+            ("###### 条", "条"),
+            ("####### 条", "####### 条"),
+            ("#法", "#法"),
+            ("- 一", "一"),
+            ("    - 二", "二"),
+            ("-", ""),
+            ("  -", ""),
+            ("-x", "-x"),
+            ("本文", "本文"),
+            ("", ""),
         ] {
             assert_eq!(strip_prefix(line), want, "{line:?}");
         }
@@ -175,7 +202,10 @@ mod tests {
     fn dropped_character_fails() {
         let xml = fixture_xml(SUFFIXES[2]);
         let mutated = md(&xml).replacen("元日", "元", 1);
-        assert!(check(&xml, &mutated, "mutated").unwrap_err().to_string().contains("mismatch at char"));
+        assert!(check(&xml, &mutated, "mutated")
+            .unwrap_err()
+            .to_string()
+            .contains("mismatch at char"));
     }
 
     #[test]
@@ -190,7 +220,10 @@ mod tests {
     fn article_caption_order_and_frontmatter_ignored() {
         let xml = "<Law><LawBody><LawTitle>法</LawTitle><MainProvision><Article><ArticleCaption>（目的）</ArticleCaption><ArticleTitle>第一条</ArticleTitle><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence></Paragraph></Article></MainProvision></LawBody></Law>";
         assert_eq!(xml_text(xml).unwrap(), "法第一条（目的）本文。");
-        assert_eq!(md_text(&format!("---\ntitle: \"x\"\n---\n\n{}", md(xml))), "法第一条（目的）本文。");
+        assert_eq!(
+            md_text(&format!("---\ntitle: \"x\"\n---\n\n{}", md(xml))),
+            "法第一条（目的）本文。"
+        );
     }
 
     #[test]
@@ -229,15 +262,22 @@ mod tests {
 
     #[test]
     fn markdown_markers_in_statute_text_are_escaped() {
-        let cells: String =
-            ["-", "# 注", "1. 一", "=", "> 引用"].iter().map(|t| format!("<TableColumn><Sentence>{t}</Sentence></TableColumn>")).collect();
+        let cells: String = ["-", "# 注", "1. 一", "=", "> 引用"]
+            .iter()
+            .map(|t| format!("<TableColumn><Sentence>{t}</Sentence></TableColumn>"))
+            .collect();
         let xml = format!(
             "<Law><LawBody><MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>\
              <Item><ItemSentence><Sentence>- 項目</Sentence></ItemSentence><TableStruct><Table><TableRow>{cells}</TableRow></Table></TableStruct></Item>\
              </Paragraph></MainProvision></LawBody></Law>"
         );
         let m = md(&xml);
-        assert!(m.contains("\n\n  \\-\n\n") && m.contains("- \\- 項目") && m.contains("  \\# 注") && m.contains("\\1. 一"));
+        assert!(
+            m.contains("\n\n  \\-\n\n")
+                && m.contains("- \\- 項目")
+                && m.contains("  \\# 注")
+                && m.contains("\\1. 一")
+        );
         check(&xml, &m, "x").unwrap();
     }
 

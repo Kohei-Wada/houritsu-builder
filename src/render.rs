@@ -14,7 +14,17 @@ pub type Counts = BTreeMap<String, u64>;
 static DIGITS_THEN_MARK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+[.)]").unwrap());
 
 const ITEMS: [&str; 11] = [
-    "Item", "Subitem1", "Subitem2", "Subitem3", "Subitem4", "Subitem5", "Subitem6", "Subitem7", "Subitem8", "Subitem9", "Subitem10",
+    "Item",
+    "Subitem1",
+    "Subitem2",
+    "Subitem3",
+    "Subitem4",
+    "Subitem5",
+    "Subitem6",
+    "Subitem7",
+    "Subitem8",
+    "Subitem9",
+    "Subitem10",
 ];
 
 fn is_item(t: &str) -> bool {
@@ -108,12 +118,18 @@ impl Renderer {
     fn container(&mut self, el: El, level: usize) {
         let title = find(el, &format!("{}Title", tag(el)));
         self.heading(level, title.map(inline).unwrap_or_default());
-        self.provision(elements(el).filter(|c| !same(title, *c)).collect(), level + 1);
+        self.provision(
+            elements(el).filter(|c| !same(title, *c)).collect(),
+            level + 1,
+        );
     }
 
     fn article(&mut self, el: El, level: usize) {
         let (title, caption) = (find(el, "ArticleTitle"), find(el, "ArticleCaption"));
-        self.heading(level, title.map(inline).unwrap_or_default() + &caption.map(inline).unwrap_or_default());
+        self.heading(
+            level,
+            title.map(inline).unwrap_or_default() + &caption.map(inline).unwrap_or_default(),
+        );
         for child in elements(el) {
             if same(title, child) || same(caption, child) {
                 continue;
@@ -129,18 +145,28 @@ impl Renderer {
     fn sentence(&self, el: Option<El>) -> String {
         match el {
             None => String::new(),
-            Some(el) if find(el, "Column").is_some() => elements(el).map(inline).collect::<Vec<_>>().join(" "),
+            Some(el) if find(el, "Column").is_some() => {
+                elements(el).map(inline).collect::<Vec<_>>().join(" ")
+            }
             Some(el) => inline(el),
         }
     }
 
     fn paragraph(&mut self, el: El) {
-        let (caption, num, sentence) = (find(el, "ParagraphCaption"), find(el, "ParagraphNum"), find(el, "ParagraphSentence"));
+        let (caption, num, sentence) = (
+            find(el, "ParagraphCaption"),
+            find(el, "ParagraphNum"),
+            find(el, "ParagraphSentence"),
+        );
         if let Some(c) = caption {
             self.block(literal(&inline(c)));
         }
         let n = num.map(inline).unwrap_or_default();
-        let text = [n, self.sentence(sentence)].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" ");
+        let text = [n, self.sentence(sentence)]
+            .into_iter()
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
         self.block(literal(&text));
         for child in elements(el) {
             if same(caption, child) || same(num, child) || same(sentence, child) {
@@ -158,16 +184,28 @@ impl Renderer {
 
     fn item(&mut self, el: El, depth: usize) {
         let t = tag(el);
-        let (title, sentence) = (find(el, &format!("{t}Title")), find(el, &format!("{t}Sentence")));
-        let text = [title.map(inline).unwrap_or_default(), self.sentence(sentence)]
-            .into_iter()
-            .filter(|t| !t.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let children: Vec<El> = elements(el).filter(|c| !same(title, *c) && !same(sentence, *c)).collect();
+        let (title, sentence) = (
+            find(el, &format!("{t}Title")),
+            find(el, &format!("{t}Sentence")),
+        );
+        let text = [
+            title.map(inline).unwrap_or_default(),
+            self.sentence(sentence),
+        ]
+        .into_iter()
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+        let children: Vec<El> = elements(el)
+            .filter(|c| !same(title, *c) && !same(sentence, *c))
+            .collect();
         let mut depth = depth;
         if !text.is_empty() || children.is_empty() {
-            self.block(format!("{}- {}", "  ".repeat(depth), literal(&text)).trim_end_matches(' ').to_string());
+            self.block(
+                format!("{}- {}", "  ".repeat(depth), literal(&text))
+                    .trim_end_matches(' ')
+                    .to_string(),
+            );
             depth += 1;
         }
         // else: markdown cannot nest under an empty item, so its children take its place
@@ -191,7 +229,11 @@ impl Renderer {
                     nested = depth; // as with an empty item, the sublists take its place
                     continue;
                 }
-                self.block(format!("{}- {}", "  ".repeat(depth), literal(&text)).trim_end_matches(' ').to_string());
+                self.block(
+                    format!("{}- {}", "  ".repeat(depth), literal(&text))
+                        .trim_end_matches(' ')
+                        .to_string(),
+                );
             } else if t.starts_with("Sublist") {
                 self.list(child, nested);
             } else {
@@ -212,8 +254,11 @@ impl Renderer {
 
     fn table(&mut self, el: El, indent: &str) {
         for child in elements(el) {
-            let cells: Vec<El> =
-                if tag(child) == "Table" { elements(child).flat_map(|row| elements(row)).collect() } else { vec![child] };
+            let cells: Vec<El> = if tag(child) == "Table" {
+                elements(child).flat_map(|row| elements(row)).collect()
+            } else {
+                vec![child]
+            };
             for text in cells.into_iter().map(inline) {
                 if !text.is_empty() {
                     self.block(format!("{indent}{}", literal(&text)));
@@ -244,7 +289,9 @@ impl Renderer {
         let children: Vec<El> = elements(el).collect();
         let n = children
             .iter()
-            .take_while(|c| [title_tag.as_str(), "RelatedArticleNum", "ArithFormulaNum"].contains(&tag(**c)))
+            .take_while(|c| {
+                [title_tag.as_str(), "RelatedArticleNum", "ArithFormulaNum"].contains(&tag(**c))
+            })
             .count();
         self.heading(level, children[..n].iter().map(|c| inline(*c)).collect());
         for &child in &children[n..] {
@@ -259,7 +306,10 @@ impl Renderer {
 }
 
 pub fn parse(xml: &str) -> anyhow::Result<roxmltree::Document<'_>> {
-    let options = roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() };
+    let options = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..Default::default()
+    };
     Ok(roxmltree::Document::parse_with_options(xml, options)?)
 }
 
@@ -270,7 +320,10 @@ pub fn law_body<'a, 'i>(doc: &'a roxmltree::Document<'i>) -> anyhow::Result<El<'
 pub fn render_doc(doc: &roxmltree::Document) -> anyhow::Result<Rendered> {
     let mut r = Renderer::default();
     r.body(law_body(doc)?);
-    Ok(Rendered { markdown: r.blocks.join("\n\n") + "\n", unknown: r.unknown })
+    Ok(Rendered {
+        markdown: r.blocks.join("\n\n") + "\n",
+        unknown: r.unknown,
+    })
 }
 
 pub fn render_law(xml: &str) -> anyhow::Result<Rendered> {
@@ -419,7 +472,9 @@ pub(crate) mod tests {
             <Sublist2><Sublist2Sentence><Column><Sentence>甲</Sentence></Column><Column><Sentence>乙</Sentence></Column></Sublist2Sentence></Sublist2>\
             </Sublist1></List></Paragraph></MainProvision>");
         let r = checked(&xml);
-        assert!(r.markdown.ends_with("１ 次の通り。\n\n- 第一 保管義務\n\n  - 細目\n\n    - 甲 乙\n"));
+        assert!(r
+            .markdown
+            .ends_with("１ 次の通り。\n\n- 第一 保管義務\n\n  - 細目\n\n    - 甲 乙\n"));
         assert!(r.unknown.is_empty());
     }
 
@@ -437,7 +492,9 @@ pub(crate) mod tests {
     fn enact_statement_is_one_block() {
         let xml = law(&format!("<EnactStatement>爆発物取締罰則別冊ノ通制定ス</EnactStatement><MainProvision>{}</MainProvision>", para("本文。", "")));
         let r = checked(&xml);
-        assert!(r.markdown.starts_with("# テスト法\n\n爆発物取締罰則別冊ノ通制定ス\n\n"));
+        assert!(r
+            .markdown
+            .starts_with("# テスト法\n\n爆発物取締罰則別冊ノ通制定ス\n\n"));
         assert!(r.unknown.is_empty());
     }
 
@@ -450,7 +507,9 @@ pub(crate) mod tests {
             para("本文。", "")
         ));
         let r = checked(&xml);
-        assert!(r.markdown.starts_with("# テスト法\n\n１ 前文一。\n\n前文二。\n\n本文。\n"));
+        assert!(r
+            .markdown
+            .starts_with("# テスト法\n\n１ 前文一。\n\n前文二。\n\n本文。\n"));
         assert!(r.unknown.is_empty());
     }
 
@@ -466,8 +525,13 @@ pub(crate) mod tests {
 
     #[test]
     fn sup_sub_in_paragraph() {
-        let xml = law(&format!("<MainProvision>{}</MainProvision>", para("Ｘ<Sup>２</Sup>と<Sub>１</Sub>。", "")));
-        assert!(checked(&xml).markdown.ends_with("Ｘ<sup>２</sup>と<sub>１</sub>。\n"));
+        let xml = law(&format!(
+            "<MainProvision>{}</MainProvision>",
+            para("Ｘ<Sup>２</Sup>と<Sub>１</Sub>。", "")
+        ));
+        assert!(checked(&xml)
+            .markdown
+            .ends_with("Ｘ<sup>２</sup>と<sub>１</sub>。\n"));
     }
 
     #[test]
@@ -482,9 +546,9 @@ pub(crate) mod tests {
              <Subitem1><Subitem1Title>ロ</Subitem1Title><Subitem1Sentence><Sentence>乙</Sentence></Subitem1Sentence></Subitem1>\
              </Item></Paragraph></MainProvision>"
         ));
-        assert!(checked(&xml)
-            .markdown
-            .ends_with("- 一 本\n\n  - イ 甲\n\n    表\n\n    元日\n\n    一月一日\n\n    備考\n\n  - ロ 乙\n"));
+        assert!(checked(&xml).markdown.ends_with(
+            "- 一 本\n\n  - イ 甲\n\n    表\n\n    元日\n\n    一月一日\n\n    備考\n\n  - ロ 乙\n"
+        ));
     }
 
     #[test]

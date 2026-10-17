@@ -66,7 +66,6 @@ pub fn retain_non_ascii_ws(s: &mut String) {
     s.retain(|c| !matches!(c, ' ' | '\t' | '\r' | '\n'));
 }
 
-
 fn push_inline(el: El, out: &mut String) {
     push_text(el, out);
     for child in elements(el) {
@@ -127,26 +126,41 @@ mod tests {
 
     #[test]
     fn inline_joins_sentences_without_pretty_whitespace() {
-        assert_eq!(inline_of("<S>\n  <Sentence>一。</Sentence>\n  <Sentence>二。</Sentence>\n</S>"), "一。二。");
+        assert_eq!(
+            inline_of("<S>\n  <Sentence>一。</Sentence>\n  <Sentence>二。</Sentence>\n</S>"),
+            "一。二。"
+        );
     }
 
     #[test]
     fn inline_ruby() {
-        assert_eq!(inline_of("<Sentence><Ruby>𠮟<Rt>しつ</Rt></Ruby>責する。</Sentence>"), "<ruby>𠮟<rt>しつ</rt></ruby>責する。");
+        assert_eq!(
+            inline_of("<Sentence><Ruby>𠮟<Rt>しつ</Rt></Ruby>責する。</Sentence>"),
+            "<ruby>𠮟<rt>しつ</rt></ruby>責する。"
+        );
     }
 
     #[test]
     fn inline_ruby_multiple_rt_keeps_order() {
-        assert_eq!(inline_of("<S><Ruby>漢<Rt>かん</Rt>字<Rt>じ</Rt></Ruby></S>"), "<ruby>漢<rt>かん</rt>字<rt>じ</rt></ruby>");
+        assert_eq!(
+            inline_of("<S><Ruby>漢<Rt>かん</Rt>字<Rt>じ</Rt></Ruby></S>"),
+            "<ruby>漢<rt>かん</rt>字<rt>じ</rt></ruby>"
+        );
     }
 
     #[test]
     fn inline_sup_sub() {
-        assert_eq!(inline_of("<Sentence>Ａ<Sup>２</Sup>、Ｂ<Sub>１</Sub>及び</Sentence>"), "Ａ<sup>２</sup>、Ｂ<sub>１</sub>及び");
+        assert_eq!(
+            inline_of("<Sentence>Ａ<Sup>２</Sup>、Ｂ<Sub>１</Sub>及び</Sentence>"),
+            "Ａ<sup>２</sup>、Ｂ<sub>１</sub>及び"
+        );
     }
 
     #[test]
     fn comments_are_dropped_and_text_around_them_joins() {
-        assert_eq!(inline_of("<S>前<!-- c -->後<A/>尾<!-- d -->端</S>"), "前後尾端");
+        assert_eq!(
+            inline_of("<S>前<!-- c -->後<A/>尾<!-- d -->端</S>"),
+            "前後尾端"
+        );
     }
 }

@@ -15,7 +15,11 @@ const PAGES_AT_ONCE: usize = 4; // a page takes 1.5–3 s; four at once took 2.2
 
 fn law_page(client: &dyn Api, offset: usize, params: &[(&str, &str)]) -> Result<Value, ApiError> {
     let offset = offset.to_string();
-    let mut all = vec![("limit", "1000"), ("offset", offset.as_str()), ("response_format", "json")];
+    let mut all = vec![
+        ("limit", "1000"),
+        ("offset", offset.as_str()),
+        ("response_format", "json"),
+    ];
     all.extend_from_slice(params);
     client.get_json("laws", &all)
 }
@@ -24,19 +28,28 @@ fn law_page(client: &dyn Api, offset: usize, params: &[(&str, &str)]) -> Result<
 pub fn fetch_law_list(client: &dyn Api, params: &[(&str, &str)]) -> Result<Vec<Value>, ApiError> {
     let first = law_page(client, 0, params)?;
     let mut laws = first["laws"].as_array().cloned().unwrap_or_default();
-    let (stride, total) = (laws.len(), first["total_count"].as_u64().unwrap_or(0) as usize);
+    let (stride, total) = (
+        laws.len(),
+        first["total_count"].as_u64().unwrap_or(0) as usize,
+    );
     if stride == 0 || laws.len() >= total {
         return Ok(laws);
     }
     let offsets: Vec<usize> = (stride..total).step_by(stride).collect();
-    for page in at_once(&offsets, PAGES_AT_ONCE, |_, &offset| law_page(client, offset, params)) {
+    for page in at_once(&offsets, PAGES_AT_ONCE, |_, &offset| {
+        law_page(client, offset, params)
+    }) {
         laws.extend(page?["laws"].as_array().cloned().unwrap_or_default());
     }
     Ok(laws)
 }
 
 /// Runs `f` on every item with up to `jobs` threads; the results keep the items' order.
-fn at_once<T: Sync, R: Send>(items: &[T], jobs: usize, f: impl Fn(usize, &T) -> R + Sync) -> Vec<R> {
+fn at_once<T: Sync, R: Send>(
+    items: &[T],
+    jobs: usize,
+    f: impl Fn(usize, &T) -> R + Sync,
+) -> Vec<R> {
     let results: Vec<Mutex<Option<R>>> = items.iter().map(|_| Mutex::new(None)).collect();
     let next = AtomicUsize::new(0);
     std::thread::scope(|s| {
@@ -48,15 +61,25 @@ fn at_once<T: Sync, R: Send>(items: &[T], jobs: usize, f: impl Fn(usize, &T) -> 
             });
         }
     });
-    results.into_iter().map(|r| r.into_inner().unwrap().expect("every item ran")).collect()
+    results
+        .into_iter()
+        .map(|r| r.into_inner().unwrap().expect("every item ran"))
+        .collect()
 }
 
 fn law_id(law: &Value) -> String {
-    law["law_info"]["law_id"].as_str().unwrap_or_default().to_string()
+    law["law_info"]["law_id"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
 }
 
 pub fn today_jst() -> String {
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64 + 9 * 3600;
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + 9 * 3600;
     let z = secs.div_euclid(86400) + 719468;
     let era = z.div_euclid(146097);
     let doe = z - era * 146097;
@@ -70,31 +93,68 @@ pub fn today_jst() -> String {
 }
 
 fn revisions_of(doc: &Value) -> &[Value] {
-    doc["revisions"].as_array().map(Vec::as_slice).unwrap_or_default()
+    doc["revisions"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
 }
 
-fn stale(cache: &Cache, law_id: &str, newest: [Option<&Value>; 2], today: &str, not_found: &HashSet<String>) -> anyhow::Result<bool> {
+fn stale(
+    cache: &Cache,
+    law_id: &str,
+    newest: [Option<&Value>; 2],
+    today: &str,
+    not_found: &HashSet<String>,
+) -> anyhow::Result<bool> {
     let path = cache.revisions_path(law_id);
     if !path.exists() {
         return Ok(true);
     }
     let doc = cache.read(&path)?;
     let revisions = revisions_of(&doc);
-    let rid = |r: &Value| r["law_revision_id"].as_str().unwrap_or_default().to_string();
-    if revisions.iter().any(|r| !not_found.contains(&rid(r)) && !cache.data_path(&rid(r)).exists()) {
+    let rid = |r: &Value| {
+        r["law_revision_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    };
+    if revisions
+        .iter()
+        .any(|r| !not_found.contains(&rid(r)) && !cache.data_path(&rid(r)).exists())
+    {
         return Ok(true); // a full text failed last time
     }
-    let seen: HashSet<(String, String)> = revisions.iter().map(|r| (rid(r), r["updated"].to_string())).collect();
-    if newest.iter().flatten().any(|info| is_truthy(info) && !seen.contains(&(rid(info), info["updated"].to_string()))) {
+    let seen: HashSet<(String, String)> = revisions
+        .iter()
+        .map(|r| (rid(r), r["updated"].to_string()))
+        .collect();
+    if newest
+        .iter()
+        .flatten()
+        .any(|info| is_truthy(info) && !seen.contains(&(rid(info), info["updated"].to_string())))
+    {
         return Ok(true);
     }
     Ok(revisions.iter().any(|r| {
-        r["current_revision_status"] == "UnEnforced" && r["amendment_enforcement_date"].as_str().filter(|d| !d.is_empty()).unwrap_or("9999") <= today
+        r["current_revision_status"] == "UnEnforced"
+            && r["amendment_enforcement_date"]
+                .as_str()
+                .filter(|d| !d.is_empty())
+                .unwrap_or("9999")
+                <= today
     }))
 }
 
 fn amendments(revisions: &[Value]) -> HashSet<String> {
-    revisions.iter().filter_map(|r| r["amendment_law_id"].as_str().filter(|s| !s.is_empty()).map(str::to_string)).collect()
+    revisions
+        .iter()
+        .filter_map(|r| {
+            r["amendment_law_id"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+        .collect()
 }
 
 pub struct Options<'a> {
@@ -108,26 +168,59 @@ pub struct Options<'a> {
 pub type Stats = BTreeMap<&'static str, u64>;
 
 /// The laws whose revision list to (re)fetch, never-fetched first, and every listed law's type.
-fn select(client: &dyn Api, cache: &Cache, o: &Options) -> anyhow::Result<(Vec<String>, HashMap<String, String>)> {
+fn select(
+    client: &dyn Api,
+    cache: &Cache,
+    o: &Options,
+) -> anyhow::Result<(Vec<String>, HashMap<String, String>)> {
     if !o.law_ids.is_empty() {
         return Ok((o.law_ids.clone(), HashMap::new()));
     }
     let (laws, future) = std::thread::scope(|s| {
         let future = (!o.full).then(|| s.spawn(|| fetch_law_list(client, &[("asof", FUTURE)])));
-        (fetch_law_list(client, &[]), future.map(|f| f.join().unwrap()))
+        (
+            fetch_law_list(client, &[]),
+            future.map(|f| f.join().unwrap()),
+        )
     });
     let laws = laws?;
     cache.write(&cache.laws_path(), &Value::Array(laws.clone()))?;
-    let types: HashMap<String, String> =
-        laws.iter().map(|l| (law_id(l), l["law_info"]["law_type"].as_str().unwrap_or_default().to_string())).collect();
-    let mut targets: Vec<String> = laws.iter().map(law_id).filter(|id| of_type(o, types.get(id))).collect();
+    let types: HashMap<String, String> = laws
+        .iter()
+        .map(|l| {
+            (
+                law_id(l),
+                l["law_info"]["law_type"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        })
+        .collect();
+    let mut targets: Vec<String> = laws
+        .iter()
+        .map(law_id)
+        .filter(|id| of_type(o, types.get(id)))
+        .collect();
     if let Some(future) = future {
-        let future: HashMap<String, Value> = future?.into_iter().map(|l| (law_id(&l), l["revision_info"].clone())).collect();
-        let current: HashMap<String, Value> = laws.iter().map(|l| (law_id(l), l["revision_info"].clone())).collect();
+        let future: HashMap<String, Value> = future?
+            .into_iter()
+            .map(|l| (law_id(&l), l["revision_info"].clone()))
+            .collect();
+        let current: HashMap<String, Value> = laws
+            .iter()
+            .map(|l| (law_id(l), l["revision_info"].clone()))
+            .collect();
         let (today, not_found) = (today_jst(), cache.not_found()?);
         let mut kept = vec![];
         for id in targets {
-            if stale(cache, &id, [current.get(&id), future.get(&id)], &today, &not_found)? {
+            if stale(
+                cache,
+                &id,
+                [current.get(&id), future.get(&id)],
+                &today,
+                &not_found,
+            )? {
                 kept.push(id);
             }
         }
@@ -141,7 +234,8 @@ fn select(client: &dyn Api, cache: &Cache, o: &Options) -> anyhow::Result<(Vec<S
 }
 
 fn of_type(o: &Options, law_type: Option<&String>) -> bool {
-    o.law_type.is_none_or(|t| t.is_empty() || law_type.is_some_and(|x| x == t))
+    o.law_type
+        .is_none_or(|t| t.is_empty() || law_type.is_some_and(|x| x == t))
 }
 
 struct Run<'a> {
@@ -173,7 +267,9 @@ impl Run<'_> {
         let path = self.cache.revisions_path(id);
         if path.exists() {
             let old = amendments(revisions_of(&self.cache.read(&path)?));
-            let added = amendments(revisions_of(&revisions)).into_iter().filter(|a| !old.contains(a));
+            let added = amendments(revisions_of(&revisions))
+                .into_iter()
+                .filter(|a| !old.contains(a));
             self.new_amendments.lock().unwrap().extend(added);
         }
         self.cache.write(&path, &revisions)?;
@@ -185,7 +281,10 @@ impl Run<'_> {
             if path.exists() {
                 continue;
             }
-            match self.client.get_json(&format!("law_data/{rid}"), &[("law_full_text_format", "xml"), ("response_format", "json")]) {
+            match self.client.get_json(
+                &format!("law_data/{rid}"),
+                &[("law_full_text_format", "xml"), ("response_format", "json")],
+            ) {
                 Ok(data) => {
                     self.cache.write(&path, &data)?;
                     self.count("fetched", 1);
@@ -202,10 +301,20 @@ impl Run<'_> {
 /// The laws, not yet done, that these amending laws also amend. A new amending law can add a
 /// revision in the middle of a law's history, which the newest-revision check misses; e-Gov lists
 /// every law it amends.
-fn amended_by(client: &dyn Api, amendments: &[String], o: &Options, types: &HashMap<String, String>, done: &HashSet<String>) -> anyhow::Result<Vec<String>> {
+fn amended_by(
+    client: &dyn Api,
+    amendments: &[String],
+    o: &Options,
+    types: &HashMap<String, String>,
+    done: &HashSet<String>,
+) -> anyhow::Result<Vec<String>> {
     let mut found = vec![];
     for amendment in amendments {
-        let params = [("amendment_law_id", amendment.as_str()), ("asof", FUTURE), ("omit_current_revision_info", "true")];
+        let params = [
+            ("amendment_law_id", amendment.as_str()),
+            ("asof", FUTURE),
+            ("omit_current_revision_info", "true"),
+        ];
         for l in fetch_law_list(client, &params)? {
             let id = law_id(&l);
             if !done.contains(&id) && !found.contains(&id) && of_type(o, types.get(&id)) {
@@ -217,13 +326,23 @@ fn amended_by(client: &dyn Api, amendments: &[String], o: &Options, types: &Hash
 }
 
 /// Fetches revision lists and new revisions. Unless full, only for laws whose list may have changed.
-pub fn fetch(client: &dyn Api, cache: &Cache, o: &Options, log: &(dyn Fn(&str) + Sync)) -> anyhow::Result<Stats> {
+pub fn fetch(
+    client: &dyn Api,
+    cache: &Cache,
+    o: &Options,
+    log: &(dyn Fn(&str) + Sync),
+) -> anyhow::Result<Stats> {
     let (mut targets, types) = select(client, cache, o)?;
     let run = Run {
         client,
         cache,
         log,
-        stats: Mutex::new(BTreeMap::from([("laws", 0), ("revisions", 0), ("fetched", 0), ("failed", 0)])),
+        stats: Mutex::new(BTreeMap::from([
+            ("laws", 0),
+            ("revisions", 0),
+            ("fetched", 0),
+            ("failed", 0),
+        ])),
         new_amendments: Mutex::new(HashSet::new()),
     };
     let (mut done, mut queried, mut step) = (HashSet::new(), HashSet::new(), 0);
@@ -236,7 +355,13 @@ pub fn fetch(client: &dyn Api, cache: &Cache, o: &Options, log: &(dyn Fn(&str) +
         if o.full || !o.law_ids.is_empty() {
             break;
         }
-        let mut found: Vec<String> = run.new_amendments.lock().unwrap().drain().filter(|a| queried.insert(a.clone())).collect();
+        let mut found: Vec<String> = run
+            .new_amendments
+            .lock()
+            .unwrap()
+            .drain()
+            .filter(|a| queried.insert(a.clone()))
+            .collect();
         found.sort();
         targets = amended_by(client, &found, o, &types, &done)?;
     }
@@ -257,7 +382,13 @@ mod tests {
 
     impl Fake {
         fn new(routes: Vec<(&str, Route)>) -> Self {
-            Fake { routes: routes.into_iter().map(|(k, v)| (k.to_string(), v)).collect(), calls: Mutex::new(vec![]) }
+            Fake {
+                routes: routes
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
+                calls: Mutex::new(vec![]),
+            }
         }
 
         fn calls(&self) -> Vec<String> {
@@ -268,8 +399,14 @@ mod tests {
     impl Api for Fake {
         fn get_json(&self, path: &str, params: &[(&str, &str)]) -> Result<Value, ApiError> {
             self.calls.lock().unwrap().push(path.to_string());
-            let p = params.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-            (self.routes.get(path).unwrap_or_else(|| panic!("no route {path}")))(&p)
+            let p = params
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            (self
+                .routes
+                .get(path)
+                .unwrap_or_else(|| panic!("no route {path}")))(&p)
         }
     }
 
@@ -286,7 +423,13 @@ mod tests {
     }
 
     fn opts() -> Options<'static> {
-        Options { law_type: None, law_ids: vec![], limit: None, jobs: 1, full: false }
+        Options {
+            law_type: None,
+            law_ids: vec![],
+            limit: None,
+            jobs: 1,
+            full: false,
+        }
     }
 
     fn quiet(_: &str) {}
@@ -302,7 +445,11 @@ mod tests {
                 })
             }),
         )]);
-        let ids: Vec<String> = fetch_law_list(&fake, &[]).unwrap().iter().map(law_id).collect();
+        let ids: Vec<String> = fetch_law_list(&fake, &[])
+            .unwrap()
+            .iter()
+            .map(law_id)
+            .collect();
         assert_eq!(ids, ["A", "B", "C"]);
     }
 
@@ -312,11 +459,17 @@ mod tests {
             "laws",
             Box::new(|p| {
                 let offset: usize = p["offset"].parse().unwrap();
-                let ids: Vec<Value> = (offset..(offset + 2).min(11)).map(|n| law(&format!("L{n:02}"), "Act")).collect();
+                let ids: Vec<Value> = (offset..(offset + 2).min(11))
+                    .map(|n| law(&format!("L{n:02}"), "Act"))
+                    .collect();
                 Ok(json!({"total_count": 11, "laws": ids}))
             }),
         )]);
-        let ids: Vec<String> = fetch_law_list(&fake, &[]).unwrap().iter().map(law_id).collect();
+        let ids: Vec<String> = fetch_law_list(&fake, &[])
+            .unwrap()
+            .iter()
+            .map(law_id)
+            .collect();
         assert_eq!(ids, (0..11).map(|n| format!("L{n:02}")).collect::<Vec<_>>());
         assert_eq!(fake.calls().len(), 6);
     }
@@ -325,25 +478,64 @@ mod tests {
     fn fetch_filters_skips_cached_and_records_failures() {
         let d = tempfile::tempdir().unwrap();
         let cache = Cache::new(d.path());
-        cache.write(&cache.data_path("A_1_X"), &json!({"cached": true})).unwrap();
+        cache
+            .write(&cache.data_path("A_1_X"), &json!({"cached": true}))
+            .unwrap();
         let fake = Fake::new(vec![
-            ("laws", fixed(json!({"total_count": 3, "laws": [law("A", "Act"), law("B", "Act"), law("O", "CabinetOrder")]}))),
+            (
+                "laws",
+                fixed(
+                    json!({"total_count": 3, "laws": [law("A", "Act"), law("B", "Act"), law("O", "CabinetOrder")]}),
+                ),
+            ),
             ("law_revisions/A", fixed(revs("A", &["A_1_X", "A_2_Y"]))),
-            ("law_revisions/B", Box::new(|_| Err(ApiError("gave up".into())))),
+            (
+                "law_revisions/B",
+                Box::new(|_| Err(ApiError("gave up".into()))),
+            ),
             ("law_data/A_2_Y", fixed(json!({"law_full_text": "x"}))),
         ]);
-        let stats = fetch(&fake, &cache, &Options { law_type: Some("Act"), ..opts() }, &quiet).unwrap();
-        assert!(!fake.calls().contains(&"law_data/A_1_X".to_string()) && !fake.calls().contains(&"law_revisions/O".to_string()));
-        assert_eq!(cache.read(&cache.data_path("A_2_Y")).unwrap(), json!({"law_full_text": "x"}));
-        assert_eq!(stats, BTreeMap::from([("laws", 1), ("revisions", 2), ("fetched", 1), ("failed", 1)]));
-        assert!(std::fs::read_to_string(d.path().join("failures.jsonl")).unwrap().contains("law_revisions"));
+        let stats = fetch(
+            &fake,
+            &cache,
+            &Options {
+                law_type: Some("Act"),
+                ..opts()
+            },
+            &quiet,
+        )
+        .unwrap();
+        assert!(
+            !fake.calls().contains(&"law_data/A_1_X".to_string())
+                && !fake.calls().contains(&"law_revisions/O".to_string())
+        );
+        assert_eq!(
+            cache.read(&cache.data_path("A_2_Y")).unwrap(),
+            json!({"law_full_text": "x"})
+        );
+        assert_eq!(
+            stats,
+            BTreeMap::from([("laws", 1), ("revisions", 2), ("fetched", 1), ("failed", 1)])
+        );
+        assert!(std::fs::read_to_string(d.path().join("failures.jsonl"))
+            .unwrap()
+            .contains("law_revisions"));
     }
 
     #[test]
     fn fetch_by_law_id_skips_listing() {
         let d = tempfile::tempdir().unwrap();
         let fake = Fake::new(vec![("law_revisions/A", fixed(revs("A", &[])))]);
-        fetch(&fake, &Cache::new(d.path()), &Options { law_ids: vec!["A".into()], ..opts() }, &quiet).unwrap();
+        fetch(
+            &fake,
+            &Cache::new(d.path()),
+            &Options {
+                law_ids: vec!["A".into()],
+                ..opts()
+            },
+            &quiet,
+        )
+        .unwrap();
         assert_eq!(fake.calls(), ["law_revisions/A"]);
     }
 
@@ -351,13 +543,27 @@ mod tests {
     fn fetch_takes_never_fetched_laws_first() {
         let d = tempfile::tempdir().unwrap();
         let cache = Cache::new(d.path());
-        cache.write(&cache.revisions_path("A"), &revs("A", &[])).unwrap();
+        cache
+            .write(&cache.revisions_path("A"), &revs("A", &[]))
+            .unwrap();
         let fake = Fake::new(vec![
-            ("laws", fixed(json!({"total_count": 2, "laws": [law("A", "Act"), law("B", "Act")]}))),
+            (
+                "laws",
+                fixed(json!({"total_count": 2, "laws": [law("A", "Act"), law("B", "Act")]})),
+            ),
             ("law_revisions/A", fixed(revs("A", &[]))),
             ("law_revisions/B", fixed(revs("B", &[]))),
         ]);
-        fetch(&fake, &cache, &Options { full: true, ..opts() }, &quiet).unwrap();
+        fetch(
+            &fake,
+            &cache,
+            &Options {
+                full: true,
+                ..opts()
+            },
+            &quiet,
+        )
+        .unwrap();
         assert_eq!(fake.calls(), ["laws", "law_revisions/B", "law_revisions/A"]);
     }
 
@@ -366,19 +572,44 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let cache = Cache::new(d.path());
         let ids: Vec<String> = (0..20).map(|n| format!("L{n}")).collect();
-        let mut routes: Vec<(String, Route)> =
-            vec![("laws".into(), fixed(json!({"total_count": 20, "laws": ids.iter().map(|i| law(i, "Act")).collect::<Vec<_>>()})))];
+        let mut routes: Vec<(String, Route)> = vec![(
+            "laws".into(),
+            fixed(
+                json!({"total_count": 20, "laws": ids.iter().map(|i| law(i, "Act")).collect::<Vec<_>>()}),
+            ),
+        )];
         for i in &ids {
-            let route: Route = if i == "L3" { Box::new(|_| Err(ApiError("gave up".into()))) } else { fixed(revs(i, &[&format!("{i}_1_X"), &format!("{i}_2_Y")])) };
+            let route: Route = if i == "L3" {
+                Box::new(|_| Err(ApiError("gave up".into())))
+            } else {
+                fixed(revs(i, &[&format!("{i}_1_X"), &format!("{i}_2_Y")]))
+            };
             routes.push((format!("law_revisions/{i}"), route));
             for s in ["1_X", "2_Y"] {
-                routes.push((format!("law_data/{i}_{s}"), fixed(json!({"law_full_text": i}))));
+                routes.push((
+                    format!("law_data/{i}_{s}"),
+                    fixed(json!({"law_full_text": i})),
+                ));
             }
         }
-        let fake = Fake { routes: routes.into_iter().collect(), calls: Mutex::new(vec![]) };
+        let fake = Fake {
+            routes: routes.into_iter().collect(),
+            calls: Mutex::new(vec![]),
+        };
         let stats = fetch(&fake, &cache, &Options { jobs: 4, ..opts() }, &quiet).unwrap();
-        assert_eq!(stats, BTreeMap::from([("laws", 19), ("revisions", 38), ("fetched", 38), ("failed", 1)]));
-        assert_eq!(cache.read(&cache.data_path("L7_2_Y")).unwrap(), json!({"law_full_text": "L7"}));
+        assert_eq!(
+            stats,
+            BTreeMap::from([
+                ("laws", 19),
+                ("revisions", 38),
+                ("fetched", 38),
+                ("failed", 1)
+            ])
+        );
+        assert_eq!(
+            cache.read(&cache.data_path("L7_2_Y")).unwrap(),
+            json!({"law_full_text": "L7"})
+        );
     }
 
     fn listed(id: &str, rid: &str, updated: &str) -> Value {
@@ -390,7 +621,11 @@ mod tests {
                "amendment_enforcement_date": enforced, "updated": "u1"})
     }
 
-    fn law_lists(now: Vec<Value>, future: Vec<Value>, by_amendment: HashMap<String, Vec<Value>>) -> Route {
+    fn law_lists(
+        now: Vec<Value>,
+        future: Vec<Value>,
+        by_amendment: HashMap<String, Vec<Value>>,
+    ) -> Route {
         Box::new(move |p| {
             let found = match (p.get("amendment_law_id"), p.get("asof")) {
                 (Some(a), _) => by_amendment.get(a).cloned().unwrap_or_default(),
@@ -410,62 +645,154 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let cache = Cache::new(d.path());
         let cached = [
-            ("SAME", vec![rev("SAME_1", None, "CurrentEnforced", "2020-01-01")]),
-            ("NEWER", vec![rev("NEWER_1", None, "CurrentEnforced", "2020-01-01")]),
-            ("EDITED", vec![rev("EDITED_1", None, "CurrentEnforced", "2020-01-01")]),
-            ("DUE", vec![rev("DUE_2", None, "UnEnforced", "2000-01-01"), rev("DUE_1", None, "CurrentEnforced", "2020-01-01")]),
-            ("LATER", vec![rev("LATER_2", None, "UnEnforced", "9999-01-01"), rev("LATER_1", None, "CurrentEnforced", "2020-01-01")]),
-            ("FAILED", vec![rev("FAILED_1", None, "CurrentEnforced", "2020-01-01")]),
-            ("GONE", vec![rev("GONE_1", None, "CurrentEnforced", "2020-01-01")]),
+            (
+                "SAME",
+                vec![rev("SAME_1", None, "CurrentEnforced", "2020-01-01")],
+            ),
+            (
+                "NEWER",
+                vec![rev("NEWER_1", None, "CurrentEnforced", "2020-01-01")],
+            ),
+            (
+                "EDITED",
+                vec![rev("EDITED_1", None, "CurrentEnforced", "2020-01-01")],
+            ),
+            (
+                "DUE",
+                vec![
+                    rev("DUE_2", None, "UnEnforced", "2000-01-01"),
+                    rev("DUE_1", None, "CurrentEnforced", "2020-01-01"),
+                ],
+            ),
+            (
+                "LATER",
+                vec![
+                    rev("LATER_2", None, "UnEnforced", "9999-01-01"),
+                    rev("LATER_1", None, "CurrentEnforced", "2020-01-01"),
+                ],
+            ),
+            (
+                "FAILED",
+                vec![rev("FAILED_1", None, "CurrentEnforced", "2020-01-01")],
+            ),
+            (
+                "GONE",
+                vec![rev("GONE_1", None, "CurrentEnforced", "2020-01-01")],
+            ),
         ];
         for (id, revisions) in &cached {
-            cache.write(&cache.revisions_path(id), &doc(id, revisions.clone())).unwrap();
+            cache
+                .write(&cache.revisions_path(id), &doc(id, revisions.clone()))
+                .unwrap();
             if !["FAILED", "GONE"].contains(id) {
                 for r in revisions {
-                    cache.write(&cache.data_path(r["law_revision_id"].as_str().unwrap()), &json!({"law_full_text": ""})).unwrap();
+                    cache
+                        .write(
+                            &cache.data_path(r["law_revision_id"].as_str().unwrap()),
+                            &json!({"law_full_text": ""}),
+                        )
+                        .unwrap();
                 }
             }
         }
-        cache.record_failure("law_data", "GONE_1", "404 https://x").unwrap();
+        cache
+            .record_failure("law_data", "GONE_1", "404 https://x")
+            .unwrap();
         let now = vec![
-            listed("SAME", "SAME_1", "u1"), listed("NEWER", "NEWER_1", "u1"), listed("EDITED", "EDITED_1", "u2"),
-            listed("DUE", "DUE_1", "u1"), listed("LATER", "LATER_1", "u1"), listed("NEW", "NEW_1", "u1"),
-            listed("FAILED", "FAILED_1", "u1"), listed("GONE", "GONE_1", "u1"),
+            listed("SAME", "SAME_1", "u1"),
+            listed("NEWER", "NEWER_1", "u1"),
+            listed("EDITED", "EDITED_1", "u2"),
+            listed("DUE", "DUE_1", "u1"),
+            listed("LATER", "LATER_1", "u1"),
+            listed("NEW", "NEW_1", "u1"),
+            listed("FAILED", "FAILED_1", "u1"),
+            listed("GONE", "GONE_1", "u1"),
         ];
         let future = vec![
-            listed("SAME", "SAME_1", "u1"), listed("NEWER", "NEWER_2", "u1"), listed("EDITED", "EDITED_1", "u2"),
-            listed("DUE", "DUE_2", "u1"), listed("LATER", "LATER_2", "u1"), listed("NEW", "NEW_1", "u1"),
-            listed("FAILED", "FAILED_1", "u1"), listed("GONE", "GONE_1", "u1"),
+            listed("SAME", "SAME_1", "u1"),
+            listed("NEWER", "NEWER_2", "u1"),
+            listed("EDITED", "EDITED_1", "u2"),
+            listed("DUE", "DUE_2", "u1"),
+            listed("LATER", "LATER_2", "u1"),
+            listed("NEW", "NEW_1", "u1"),
+            listed("FAILED", "FAILED_1", "u1"),
+            listed("GONE", "GONE_1", "u1"),
         ];
         let mut routes: Vec<(&str, Route)> = vec![("laws", law_lists(now, future, HashMap::new()))];
-        let paths: Vec<String> = ["NEWER", "EDITED", "DUE", "NEW", "FAILED"].iter().map(|id| format!("law_revisions/{id}")).collect();
-        for (p, id) in paths.iter().zip(["NEWER", "EDITED", "DUE", "NEW", "FAILED"]) {
+        let paths: Vec<String> = ["NEWER", "EDITED", "DUE", "NEW", "FAILED"]
+            .iter()
+            .map(|id| format!("law_revisions/{id}"))
+            .collect();
+        for (p, id) in paths
+            .iter()
+            .zip(["NEWER", "EDITED", "DUE", "NEW", "FAILED"])
+        {
             routes.push((p.as_str(), fixed(doc(id, vec![]))));
         }
         let fake = Fake::new(routes);
         fetch(&fake, &cache, &opts(), &quiet).unwrap();
         let mut got: Vec<String> = fake.calls().into_iter().filter(|c| c != "laws").collect();
         got.sort();
-        assert_eq!(got, ["law_revisions/DUE", "law_revisions/EDITED", "law_revisions/FAILED", "law_revisions/NEW", "law_revisions/NEWER"]);
+        assert_eq!(
+            got,
+            [
+                "law_revisions/DUE",
+                "law_revisions/EDITED",
+                "law_revisions/FAILED",
+                "law_revisions/NEW",
+                "law_revisions/NEWER"
+            ]
+        );
     }
 
     #[test]
     fn delta_follows_a_new_amending_law_to_the_other_laws_it_amends() {
         let d = tempfile::tempdir().unwrap();
         let cache = Cache::new(d.path());
-        cache.write(&cache.revisions_path("A"), &doc("A", vec![rev("A_1", Some("X1"), "CurrentEnforced", "2020-01-01")])).unwrap();
         cache
-            .write(&cache.revisions_path("B"), &doc("B", vec![rev("B_3", Some("X3"), "CurrentEnforced", "2020-01-01"), rev("B_1", Some("X1"), "CurrentEnforced", "2020-01-01")]))
+            .write(
+                &cache.revisions_path("A"),
+                &doc(
+                    "A",
+                    vec![rev("A_1", Some("X1"), "CurrentEnforced", "2020-01-01")],
+                ),
+            )
+            .unwrap();
+        cache
+            .write(
+                &cache.revisions_path("B"),
+                &doc(
+                    "B",
+                    vec![
+                        rev("B_3", Some("X3"), "CurrentEnforced", "2020-01-01"),
+                        rev("B_1", Some("X1"), "CurrentEnforced", "2020-01-01"),
+                    ],
+                ),
+            )
             .unwrap();
         for rid in ["A_1", "B_1", "B_3"] {
-            cache.write(&cache.data_path(rid), &json!({"law_full_text": ""})).unwrap();
+            cache
+                .write(&cache.data_path(rid), &json!({"law_full_text": ""}))
+                .unwrap();
         }
         let now = vec![listed("A", "A_1", "u1"), listed("B", "B_1", "u1")];
         let future = vec![listed("A", "A_2", "u1"), listed("B", "B_3", "u1")];
-        let by = HashMap::from([("X2".to_string(), vec![listed("A", "A_2", "u1"), listed("B", "B_3", "u1")])]);
+        let by = HashMap::from([(
+            "X2".to_string(),
+            vec![listed("A", "A_2", "u1"), listed("B", "B_3", "u1")],
+        )]);
         let fake = Fake::new(vec![
             ("laws", law_lists(now, future, by)),
-            ("law_revisions/A", fixed(doc("A", vec![rev("A_2", Some("X2"), "CurrentEnforced", "2020-01-01"), rev("A_1", Some("X1"), "CurrentEnforced", "2020-01-01")]))),
+            (
+                "law_revisions/A",
+                fixed(doc(
+                    "A",
+                    vec![
+                        rev("A_2", Some("X2"), "CurrentEnforced", "2020-01-01"),
+                        rev("A_1", Some("X1"), "CurrentEnforced", "2020-01-01"),
+                    ],
+                )),
+            ),
             (
                 "law_revisions/B",
                 fixed(doc(
@@ -481,7 +808,10 @@ mod tests {
             ("law_data/B_2", fixed(json!({"law_full_text": "b"}))),
         ]);
         fetch(&fake, &cache, &opts(), &quiet).unwrap();
-        assert_eq!(cache.read(&cache.data_path("B_2")).unwrap(), json!({"law_full_text": "b"}));
+        assert_eq!(
+            cache.read(&cache.data_path("B_2")).unwrap(),
+            json!({"law_full_text": "b"})
+        );
         let calls = fake.calls();
         assert_eq!(calls.iter().filter(|c| *c == "law_revisions/A").count(), 1);
         assert_eq!(calls.iter().filter(|c| *c == "law_revisions/B").count(), 1);

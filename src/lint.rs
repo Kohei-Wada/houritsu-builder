@@ -17,7 +17,10 @@ pub fn run(dir: &Path, rumdl: &[String]) -> anyhow::Result<(bool, String)> {
         .current_dir(dir)
         .output()
         .with_context(|| format!("running {}", rumdl.join(" ")))?;
-    Ok((out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr)))
+    Ok((
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
+    ))
 }
 
 #[cfg(test)]

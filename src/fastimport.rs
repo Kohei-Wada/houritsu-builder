@@ -19,8 +19,14 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 
 /// Midnight JST of a `YYYY-MM-DD` date as a Unix time; git rejects dates before 1970-01-02.
 pub fn jst_midnight(date: &str) -> anyhow::Result<i64> {
-    let parts: Vec<i64> = date.split('-').map(str::parse).collect::<Result<_, _>>().map_err(|_| anyhow::anyhow!("bad date {date:?}"))?;
-    let [y, m, d] = parts[..] else { anyhow::bail!("bad date {date:?}") };
+    let parts: Vec<i64> = date
+        .split('-')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .map_err(|_| anyhow::anyhow!("bad date {date:?}"))?;
+    let [y, m, d] = parts[..] else {
+        anyhow::bail!("bad date {date:?}")
+    };
     Ok((days_from_civil(y, m, d) * 86400 - 9 * 3600).max(86400))
 }
 
@@ -38,7 +44,12 @@ pub fn write_blob(objects: &Path, data: &[u8]) -> anyhow::Result<String> {
     let path = objects.join(&sha[..2]).join(&sha[2..]);
     if !path.exists() {
         fs::create_dir_all(path.parent().unwrap())?;
-        let tmp = path.with_file_name(format!("{}.{}.{}.tmp", &sha[2..], std::process::id(), TMP.fetch_add(1, Ordering::Relaxed)));
+        let tmp = path.with_file_name(format!(
+            "{}.{}.{}.tmp",
+            &sha[2..],
+            std::process::id(),
+            TMP.fetch_add(1, Ordering::Relaxed)
+        ));
         let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(1));
         z.write_all(&raw)?;
         fs::write(&tmp, z.finish()?)?;
@@ -67,7 +78,11 @@ pub struct Commit<'a> {
 
 impl<W: Write> Stream<W> {
     pub fn new(out: W) -> Self {
-        Stream { out, mark: 0, marks: HashMap::new() }
+        Stream {
+            out,
+            mark: 0,
+            marks: HashMap::new(),
+        }
     }
 
     fn data(&mut self, text: &str) -> std::io::Result<()> {
@@ -81,7 +96,11 @@ impl<W: Write> Stream<W> {
             Some(a) => format!("{a} <>"),
             None => COMMITTER.to_string(),
         };
-        write!(self.out, "commit {}\nmark :{}\nauthor {author} {ts} +0900\ncommitter {COMMITTER} {ts} +0900\n", c.ref_, self.mark)?;
+        write!(
+            self.out,
+            "commit {}\nmark :{}\nauthor {author} {ts} +0900\ncommitter {COMMITTER} {ts} +0900\n",
+            c.ref_, self.mark
+        )?;
         self.data(c.message)?;
         if let Some(from) = c.from_ref {
             match self.marks.get(from) {
@@ -118,20 +137,32 @@ mod tests {
     use std::process::Command;
 
     fn git(repo: &Path, args: &[&str]) -> String {
-        let o = Command::new("git").args(args).current_dir(repo).output().unwrap();
+        let o = Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap();
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8(o.stdout).unwrap()
     }
 
     fn import(repo: &Path, stream: &[u8]) {
         git(repo, &["init", "-q", "-b", "main", "."]);
-        let mut p = Command::new("git").args(["fast-import", "--quiet", "--done"]).current_dir(repo).stdin(std::process::Stdio::piped()).spawn().unwrap();
+        let mut p = Command::new("git")
+            .args(["fast-import", "--quiet", "--done"])
+            .current_dir(repo)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
         p.stdin.take().unwrap().write_all(stream).unwrap();
         assert!(p.wait().unwrap().success());
     }
 
     fn files(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]
@@ -165,10 +196,21 @@ mod tests {
         .unwrap();
         s.done().unwrap();
         import(d.path(), &s.out);
-        let log = git(d.path(), &["log", "--format=%an|%ae|%cn|%ad|%s", "--date=iso", "upcoming"]);
+        let log = git(
+            d.path(),
+            &[
+                "log",
+                "--format=%an|%ae|%cn|%ad|%s",
+                "--date=iso",
+                "upcoming",
+            ],
+        );
         assert_eq!(
             log.lines().collect::<Vec<_>>(),
-            ["令和八年法律第五十六号||houritsu-builder|2027-01-17 00:00:00 +0900|改正", "平成十五年法律第五十七号||houritsu-builder|2017-03-01 00:00:00 +0900|初版"]
+            [
+                "令和八年法律第五十六号||houritsu-builder|2027-01-17 00:00:00 +0900|改正",
+                "平成十五年法律第五十七号||houritsu-builder|2017-03-01 00:00:00 +0900|初版"
+            ]
         );
         assert_eq!(git(d.path(), &["show", "main:laws/act/A.md"]), "# 法\n");
     }
@@ -189,13 +231,19 @@ mod tests {
             ref_: "refs/heads/main",
             date: "2018-03-01",
             message: "廃止\n",
-            deleted: ["laws/act/A.md", "laws/act/C.md"].iter().map(|s| s.to_string()).collect(),
+            deleted: ["laws/act/A.md", "laws/act/C.md"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             ..Default::default()
         })
         .unwrap();
         s.done().unwrap();
         import(d.path(), &s.out);
-        assert_eq!(git(d.path(), &["ls-tree", "-r", "--name-only", "main"]), "laws/act/B.md\n");
+        assert_eq!(
+            git(d.path(), &["ls-tree", "-r", "--name-only", "main"]),
+            "laws/act/B.md\n"
+        );
     }
 
     #[test]
@@ -203,9 +251,23 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         git(d.path(), &["init", "-q", "-b", "main", "."]);
         let sha = write_blob(&d.path().join(".git/objects"), "# 法\n".as_bytes()).unwrap();
-        let mut h = Command::new("git").args(["hash-object", "--stdin"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
-        h.stdin.take().unwrap().write_all("# 法\n".as_bytes()).unwrap();
-        assert_eq!(String::from_utf8(h.wait_with_output().unwrap().stdout).unwrap().trim(), sha);
+        let mut h = Command::new("git")
+            .args(["hash-object", "--stdin"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        h.stdin
+            .take()
+            .unwrap()
+            .write_all("# 法\n".as_bytes())
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(h.wait_with_output().unwrap().stdout)
+                .unwrap()
+                .trim(),
+            sha
+        );
         let mut s = Stream::new(Vec::new());
         s.commit(Commit {
             ref_: "refs/heads/main",
@@ -217,7 +279,12 @@ mod tests {
         })
         .unwrap();
         s.done().unwrap();
-        let mut p = Command::new("git").args(["fast-import", "--quiet", "--done"]).current_dir(d.path()).stdin(std::process::Stdio::piped()).spawn().unwrap();
+        let mut p = Command::new("git")
+            .args(["fast-import", "--quiet", "--done"])
+            .current_dir(d.path())
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
         p.stdin.take().unwrap().write_all(&s.out).unwrap();
         assert!(p.wait().unwrap().success());
         assert_eq!(git(d.path(), &["show", "main:laws/act/A.md"]), "# 法\n");

@@ -53,14 +53,32 @@ mod tests {
 
     #[test]
     fn json_str_matches_python() {
-        assert_eq!(json_str("a\u{1}\u{7f}\u{2028}\\\t"), "\"a\\u0001\u{7f}\u{2028}\\\\\\t\"");
+        assert_eq!(
+            json_str("a\u{1}\u{7f}\u{2028}\\\t"),
+            "\"a\\u0001\u{7f}\u{2028}\\\\\\t\""
+        );
     }
 
     #[test]
     fn truthiness_matches_python() {
-        let falsy = [json!(null), json!(false), json!(0), json!(""), json!([]), json!({})];
+        let falsy = [
+            json!(null),
+            json!(false),
+            json!(0),
+            json!(""),
+            json!([]),
+            json!({}),
+        ];
         assert!(falsy.iter().all(|v| !is_truthy(v)));
-        assert!([json!(true), json!(1), json!("x"), json!([0]), json!({"a": 0})].iter().all(is_truthy));
+        assert!([
+            json!(true),
+            json!(1),
+            json!("x"),
+            json!([0]),
+            json!({"a": 0})
+        ]
+        .iter()
+        .all(is_truthy));
         assert_eq!(or_str(Some(""), "b"), "b");
         assert_eq!(or_str(None, "b"), "b");
         assert_eq!(or_str(Some("a"), "b"), "a");
