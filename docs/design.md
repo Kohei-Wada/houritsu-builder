@@ -70,7 +70,7 @@ The builder is Python, managed with uv. It has two commands.
 ### fetch
 
 1. List all laws.
-2. For each law, fetch its revision list and store it.
+2. For each law that may have changed (below), fetch its revision list and store it.
 3. For each revision not yet cached, fetch the full text and store the raw response.
 
 One file per response, so an interrupted run resumes where it stopped; laws never
@@ -79,8 +79,16 @@ requests. Measured on 2026-10-17: responses take 0.1–0.2 s, so the single 1 s-
 client first used was ~90 % sleep; one worker at 0.1 s gave 110 revisions/min, four gave
 only 175/min while e-Gov's empty-body failures rose from about 0.2 % to 1 %. Failures
 are retried with exponential backoff from 2 s; revisions that still fail are recorded
-and retried on the next run. A daily run only fetches
-revision lists and revisions it has not seen.
+and retried on the next run.
+
+A run refetches a law's revision list only when it may have changed: the law is new,
+the newest revision as of now or as of 2099-12-31 (`/laws?asof=`) is not in the cached
+list with the same `updated`, a cached `UnEnforced` revision is due, or a full text
+failed last time (other than with 404). A new amending
+law found in a refetched list is looked up with `/laws?amendment_law_id=`, which lists
+every law it amends, so a revision inserted mid-history is not missed. A run with
+`--full` refetches every list and catches anything these checks miss; run it weekly.
+Checked on 2026-10-17: both law lists take 41 s, and 0 of 8,611 cached laws were stale.
 
 ### build
 

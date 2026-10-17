@@ -19,11 +19,13 @@ def fetch_law_list(client, **params) -> list[dict]:
             return laws
 
 
-def _stale(cache: Cache, law_id: str, newest: list[dict | None], today: str) -> bool:
+def _stale(cache: Cache, law_id: str, newest: list[dict | None], today: str, not_found: set[str]) -> bool:
     path = cache.revisions_path(law_id)
     if not path.exists():
         return True
     revisions = cache.read(path)["revisions"]
+    if any(r["law_revision_id"] not in not_found and not cache.data_path(r["law_revision_id"]).exists() for r in revisions):
+        return True  # a full text failed last time
     seen = {(r["law_revision_id"], r.get("updated")) for r in revisions}
     if any(info and (info["law_revision_id"], info.get("updated")) not in seen for info in newest):
         return True
@@ -47,8 +49,9 @@ def fetch(client, cache: Cache, law_type=None, law_ids=None, limit=None, log=pri
         if not full:
             future = {l["law_info"]["law_id"]: l.get("revision_info") for l in fetch_law_list(client, asof=FUTURE)}
             current = {l["law_info"]["law_id"]: l.get("revision_info") for l in laws}
-            today = datetime.datetime.now(_JST).date().isoformat()
-            targets = [law_id for law_id in targets if _stale(cache, law_id, [current.get(law_id), future.get(law_id)], today)]
+            today, not_found = datetime.datetime.now(_JST).date().isoformat(), cache.not_found()
+            targets = [law_id for law_id in targets
+                       if _stale(cache, law_id, [current.get(law_id), future.get(law_id)], today, not_found)]
     targets.sort(key=lambda law_id: cache.revisions_path(law_id).exists())  # never-fetched laws first
     if limit:
         targets = targets[:limit]

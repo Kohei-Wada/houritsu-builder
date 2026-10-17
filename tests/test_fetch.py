@@ -105,18 +105,27 @@ def test_delta_refetches_only_laws_that_may_have_changed(tmp_path):
         "EDITED": [rev("EDITED_1")],
         "DUE": [rev("DUE_2", status="UnEnforced", enforced="2000-01-01"), rev("DUE_1")],
         "LATER": [rev("LATER_2", status="UnEnforced", enforced="9999-01-01"), rev("LATER_1")],
+        "FAILED": [rev("FAILED_1")],
+        "GONE": [rev("GONE_1")],
     }.items():
         cache.write(cache.revisions_path(law_id), {"law_info": {"law_id": law_id}, "revisions": revisions})
+        for r in revisions:
+            if law_id not in ("FAILED", "GONE"):
+                cache.write(cache.data_path(r["law_revision_id"]), {"law_full_text": ""})
+    cache.record_failure("law_data", "GONE_1", "404 https://x")
     now = [listed("SAME", "SAME_1"), listed("NEWER", "NEWER_1"), listed("EDITED", "EDITED_1", "u2"),
-           listed("DUE", "DUE_1"), listed("LATER", "LATER_1"), listed("NEW", "NEW_1")]
+           listed("DUE", "DUE_1"), listed("LATER", "LATER_1"), listed("NEW", "NEW_1"),
+           listed("FAILED", "FAILED_1"), listed("GONE", "GONE_1")]
     future = [listed("SAME", "SAME_1"), listed("NEWER", "NEWER_2"), listed("EDITED", "EDITED_1", "u2"),
-              listed("DUE", "DUE_2"), listed("LATER", "LATER_2"), listed("NEW", "NEW_1")]
+              listed("DUE", "DUE_2"), listed("LATER", "LATER_2"), listed("NEW", "NEW_1"),
+              listed("FAILED", "FAILED_1"), listed("GONE", "GONE_1")]
     routes = {"laws": law_lists(now, future)}
-    for law_id in ("NEWER", "EDITED", "DUE", "NEW"):
+    for law_id in ("NEWER", "EDITED", "DUE", "NEW", "FAILED"):
         routes[f"law_revisions/{law_id}"] = {"law_info": {"law_id": law_id}, "revisions": []}
     client = FakeClient(routes)
     fetch(client, cache, log=lambda m: None)
-    assert sorted(c for c in client.calls if c != "laws") == ["law_revisions/DUE", "law_revisions/EDITED", "law_revisions/NEW", "law_revisions/NEWER"]
+    assert sorted(c for c in client.calls if c != "laws") == ["law_revisions/DUE", "law_revisions/EDITED", "law_revisions/FAILED",
+                                                                       "law_revisions/NEW", "law_revisions/NEWER"]
 
 
 def test_delta_follows_a_new_amending_law_to_the_other_laws_it_amends(tmp_path):
