@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use crate::bills::Bills;
 use crate::cache::Cache;
+use crate::frontmatter::undetermined;
 use crate::py::{or_str, truthy};
 
 pub fn kebab(law_type: &str) -> String {
@@ -29,6 +30,8 @@ pub struct Revision {
     pub law_type: String,
     pub law_info: Arc<Value>,
     pub rev: Value,
+    /// Earlier revisions e-Gov has no text for, so this revision's diff covers them too.
+    pub skipped: Vec<String>,
 }
 
 impl Revision {
@@ -116,7 +119,15 @@ impl Group {
                 "公布日: {}",
                 or_str(as_str(rev.get("amendment_promulgate_date")), "不明")
             ),
-            format!("施行日: {}", or_str(self.enforced.as_deref(), "未定")),
+            format!(
+                "施行日: {}{}",
+                match self.enforced.as_deref() {
+                    Some(d) if !d.is_empty() && !undetermined(d) => d,
+                    _ => "未定",
+                },
+                as_str(truthy(rev.get("amendment_enforcement_comment")))
+                    .map_or(String::new(), |c| format!("（{c}）"))
+            ),
             String::new(),
             "変更された法令:".to_string(),
         ];
@@ -132,8 +143,16 @@ impl Group {
         lines.push(format!("Amendment-Law-Id: {}", self.amendment_law_id));
         lines.push(format!(
             "Enforced: {}",
-            or_str(self.enforced.as_deref(), "unknown")
+            match self.enforced.as_deref() {
+                Some(d) if undetermined(d) => "undetermined",
+                d => or_str(d, "unknown"),
+            }
         ));
+        for r in &self.revisions {
+            for s in &r.skipped {
+                lines.push(format!("Skipped-Revision: {s}"));
+            }
+        }
         if let Some(bill) = bills.for_law(&self.amendment_law_id) {
             lines.push(format!(
                 "Bill: {} 第{}回国会 第{}号",
@@ -183,6 +202,7 @@ pub fn load_revisions(cache: &Cache, law_type: Option<&str>) -> anyhow::Result<L
                 .to_string(),
             law_info: info.clone(),
             rev: r,
+            skipped: vec![],
         })
         .collect();
         if revs.is_empty() {
@@ -197,29 +217,32 @@ pub fn load_revisions(cache: &Cache, law_type: Option<&str>) -> anyhow::Result<L
             loaded.excluded.push(law_id);
             continue;
         }
-        loaded.skipped.extend(
-            revs.iter()
-                .filter(|r| missing.contains(r.revision_id()))
-                .map(|r| r.revision_id().to_string()),
-        );
-        loaded.revisions.extend(
-            revs.into_iter()
-                .filter(|r| !missing.contains(r.revision_id())),
-        );
+        let mut revs = revs;
+        revs.sort_by_cached_key(order);
+        let mut pending = vec![];
+        for mut r in revs {
+            if missing.contains(r.revision_id()) {
+                loaded.skipped.push(r.revision_id().to_string());
+                pending.push(r.revision_id().to_string());
+            } else {
+                r.skipped = std::mem::take(&mut pending);
+                loaded.revisions.push(r);
+            }
+        }
     }
     Ok(loaded)
 }
 
+/// The order in which a law's revisions took effect.
+fn order(r: &Revision) -> (String, String) {
+    (
+        or_str(r.enforced(), or_str(r.promulgated(), "")).to_string(),
+        r.amendment_law_id().to_string(),
+    )
+}
+
 fn drop_redundant_repeals(mut revisions: Vec<Revision>) -> Vec<Revision> {
-    revisions.sort_by(|a, b| {
-        let key = |r: &Revision| {
-            (
-                or_str(r.enforced(), or_str(r.promulgated(), "")).to_string(),
-                r.amendment_law_id().to_string(),
-            )
-        };
-        key(a).cmp(&key(b))
-    });
+    revisions.sort_by_cached_key(order);
     // A repeal is final: a later revision, even one dated the same day under a higher
     // amending-law ID (e-Gov lists that one as enforced just before the repeal), is dropped.
     let (mut alive, mut repealed) = (HashSet::new(), HashSet::new());
@@ -279,6 +302,7 @@ mod tests {
             law_type: law_type.into(),
             law_info: Arc::new(json!({"law_id": law_id, "law_num": law_num})),
             rev,
+            skipped: vec![],
         }
     }
 
@@ -388,6 +412,16 @@ mod tests {
         assert!(upcoming[0]
             .message(&Bills::default())
             .ends_with("Amendment-Law-Id: Z\nEnforced: unknown\n"));
+    }
+
+    #[test]
+    fn undetermined_enforcement_is_not_shown_as_a_date() {
+        let mut r = rev("A", "Z", Some("2117-12-31"), "2026-06-01", "UnEnforced", "法");
+        r.rev["amendment_enforcement_comment"] = json!("政令で定める日");
+        let (_, upcoming) = plan(vec![r]);
+        let m = upcoming[0].message(&Bills::default());
+        assert!(m.contains("施行日: 未定（政令で定める日）\n"), "{m}");
+        assert!(m.ends_with("Enforced: undetermined\n"), "{m}");
     }
 
     #[test]
@@ -553,8 +587,13 @@ mod tests {
     fn revision_recorded_as_404_is_skipped_not_excluded() {
         let d = tempfile::tempdir().unwrap();
         let cache = Cache::new(d.path());
+        // newest first, as e-Gov lists them
         let revs: Vec<Value> = (1..=3)
-            .map(|n| json!({"law_revision_id": format!("A_{n}_X"), "law_type": "Act"}))
+            .rev()
+            .map(|n| {
+                json!({"law_revision_id": format!("A_{n}_X"), "law_type": "Act",
+                       "amendment_law_id": format!("Z{n}"), "amendment_enforcement_date": format!("202{n}-04-01")})
+            })
             .collect();
         cache.write(&cache.revisions_path("A"), &json!({"law_info": {"law_id": "A", "law_type": "Act", "law_num": "A号"}, "revisions": revs})).unwrap();
         cache.write(&cache.data_path("A_1_X"), &json!({})).unwrap();
@@ -571,5 +610,10 @@ mod tests {
             ["A_1_X", "A_3_X"]
         );
         assert!(l.skipped == ["A_2_X"] && l.excluded.is_empty());
+        assert!(l.revisions[0].skipped.is_empty() && l.revisions[1].skipped == ["A_2_X"]);
+        let (main, _) = plan(l.revisions);
+        assert!(main[1]
+            .message(&Bills::default())
+            .ends_with("Skipped-Revision: A_2_X\n"));
     }
 }

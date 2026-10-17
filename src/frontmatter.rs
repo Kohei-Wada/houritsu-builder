@@ -7,6 +7,11 @@ use crate::py::{json_str, truthy};
 
 static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap());
 
+/// e-Gov dates an amendment whose enforcement day is not fixed yet in 2117 (12-30 or 12-31).
+pub fn undetermined(date: &str) -> bool {
+    date > "2100"
+}
+
 fn is_date(s: &str) -> bool {
     DATE.is_match(s)
 }
@@ -45,9 +50,20 @@ pub fn frontmatter(law_info: &Value, rev: &Value) -> String {
         ("law_num", "amendment_law_num"),
         ("title", "amendment_law_title"),
         ("promulgated", "amendment_promulgate_date"),
-        ("enforced", "amendment_enforcement_date"),
     ] {
         out.push(format!("  {k}: {}", v(rev.get(key))));
+    }
+    let enforced = rev.get("amendment_enforcement_date");
+    out.push(format!(
+        "  enforced: {}",
+        match enforced.and_then(Value::as_str) {
+            Some(d) if undetermined(d) => json_str("undetermined"),
+            _ => v(enforced),
+        }
+    ));
+    // the day as the amending law words it, when it is not fixed, e.g. 政令で定める日
+    if let Some(comment) = truthy(rev.get("amendment_enforcement_comment")) {
+        out.push(format!("  enforcement_comment: {}", v(Some(comment))));
     }
     out.push(format!(
         "source: {}",
@@ -119,6 +135,18 @@ mod tests {
         let out = frontmatter(&law_info(), &r);
         assert!(out.contains("abbrev: null") && out.contains("  enforced: null"));
         assert!(!out.contains("CurrentEnforced") && !out.contains("updated"));
+    }
+
+    #[test]
+    fn undetermined_enforcement_and_its_comment() {
+        let mut r = rev();
+        r["amendment_enforcement_date"] = json!("2117-12-31");
+        r["amendment_enforcement_comment"] = json!("公布の日から起算して三年を超えない範囲内において政令で定める日");
+        assert!(frontmatter(&law_info(), &r).contains(
+            "  enforced: \"undetermined\"\n  \
+             enforcement_comment: \"公布の日から起算して三年を超えない範囲内において政令で定める日\"\n\
+             source:"
+        ));
     }
 
     #[test]

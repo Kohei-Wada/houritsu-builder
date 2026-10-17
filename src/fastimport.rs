@@ -17,7 +17,8 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146097 + doe - 719468
 }
 
-/// Midnight JST of a `YYYY-MM-DD` date as a Unix time; git rejects dates before 1970-01-02.
+/// Midnight JST of a `YYYY-MM-DD` date as a Unix time. git has no dates before the epoch, so
+/// earlier days become 1970-01-02, the first midnight JST after it.
 pub fn jst_midnight(date: &str) -> anyhow::Result<i64> {
     let parts: Vec<i64> = date
         .split('-')
@@ -27,7 +28,7 @@ pub fn jst_midnight(date: &str) -> anyhow::Result<i64> {
     let [y, m, d] = parts[..] else {
         anyhow::bail!("bad date {date:?}")
     };
-    Ok((days_from_civil(y, m, d) * 86400 - 9 * 3600).max(86400))
+    Ok((days_from_civil(y, m, d) * 86400 - 9 * 3600).max(86400 - 9 * 3600))
 }
 
 pub fn hex(bytes: &[u8]) -> String {
@@ -168,7 +169,7 @@ mod tests {
     #[test]
     fn jst_midnight_values() {
         assert_eq!(jst_midnight("2017-03-01").unwrap(), 1488294000);
-        assert_eq!(jst_midnight("1960-01-01").unwrap(), 86400);
+        assert_eq!(jst_midnight("1960-01-01").unwrap(), 54000);
     }
 
     #[test]
