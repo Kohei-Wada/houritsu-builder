@@ -3,6 +3,7 @@ name = "houritsu-builder"
 version = "0.2.0"
 edition = "2021"
 description = "Builds the houritsu repository: Japanese laws as git history from the e-Gov law API"
+license = "MIT"
 publish = false
 
 [dependencies]

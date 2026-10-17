@@ -10,3 +10,7 @@ cargo build --release
 ```
 
 Design: `docs/design.md`.
+
+## License
+
+MIT. The houritsu data it builds is CC BY 4.0; see its README.

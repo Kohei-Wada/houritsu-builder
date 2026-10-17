@@ -305,7 +305,7 @@ Each check runs in tests and on every build; any failure fails the build.
    README carries the source line in e-Gov's format, the edit statement, and the 官報
    disclaimer. PDL1.0 is a site's terms, not a license for others to apply, so houritsu
    is offered under CC BY 4.0, which §1.7 allows (issue #9), with a LICENSE and a
-   no-warranty note. Statute text itself is not copyrighted (著作権法第13条).
+   no-warranty note; the builder is MIT. Statute text itself is not copyrighted (著作権法第13条).
 
 ## Open questions
 
