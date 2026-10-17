@@ -1,29 +1,25 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
-use std::io::{BufWriter, Write};
+use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
-use std::time::UNIX_EPOCH;
 
 use anyhow::{bail, Context};
 use base64::Engine;
 use rayon::prelude::*;
 use serde_json::{json, Value};
-use sha1::{Digest, Sha1};
 
 use crate::cache::Cache;
-use crate::fastimport::{hex, write_blob, Commit, Stream};
+use crate::fastimport::{write_blob, Commit, Stream};
 use crate::fidelity::check_doc;
 use crate::frontmatter::frontmatter;
 use crate::history::{load_revisions, plan, Group, Revision};
 use crate::render::{parse, render_doc, Counts};
+use crate::reuse::{self, Entries, Entry};
+use crate::{git, lint};
 
 const MARKER: &str = ".git/houritsu-build";
-const RENDERED: &str = "rendered.json"; // revision → blob of the last build, reused while the inputs are unchanged
-pub const RUMDL: [&str; 2] = ["uvx", "rumdl@0.2.79"];
 const README: &str = include_str!("../assets/README.md");
-const RUMDL_TOML: &str = include_str!("../assets/rumdl.toml");
 
 pub struct Options {
     pub law_type: Option<String>,
@@ -31,7 +27,7 @@ pub struct Options {
     pub jobs: usize,
     /// The linter command; tests point it at a fake.
     pub rumdl: Vec<String>,
-    /// Stands in for the hash of this executable; tests use it to change the code version.
+    /// Stands in for the hash of the rendering sources; tests use it to change the code version.
     pub code_version: Option<String>,
 }
 
@@ -41,7 +37,7 @@ impl Default for Options {
             law_type: None,
             lint: true,
             jobs: std::thread::available_parallelism().map_or(1, |n| n.get()),
-            rumdl: RUMDL.iter().map(|s| s.to_string()).collect(),
+            rumdl: lint::RUMDL.iter().map(|s| s.to_string()).collect(),
             code_version: None,
         }
     }
@@ -79,14 +75,6 @@ impl Report {
     }
 }
 
-fn git(dir: &Path, args: &[&str]) -> anyhow::Result<String> {
-    let out = Command::new("git").args(args).current_dir(dir).stderr(Stdio::inherit()).output()?;
-    if !out.status.success() {
-        bail!("git {} failed in {}", args.join(" "), dir.display());
-    }
-    Ok(String::from_utf8(out.stdout)?)
-}
-
 fn clear(path: &Path) -> anyhow::Result<()> {
     if path.exists() && fs::read_dir(path)?.next().is_some() {
         if !path.join(MARKER).exists() {
@@ -100,79 +88,9 @@ fn clear(path: &Path) -> anyhow::Result<()> {
 
 fn prepare(staging: &Path) -> anyhow::Result<()> {
     clear(staging)?;
-    git(staging, &["init", "-q", "-b", "main", "."])?;
+    git::run(staging, &["init", "-q", "-b", "main", "."])?;
     fs::write(staging.join(MARKER), "created by houritsu-builder\n")?;
     Ok(())
-}
-
-/// Everything a blob or its lint result depends on. Fetch or CLI changes keep the previous renders.
-const RENDER_SOURCES: [&str; 7] = [
-    include_str!("render.rs"),
-    include_str!("fidelity.rs"),
-    include_str!("frontmatter.rs"),
-    include_str!("xmltext.rs"),
-    include_str!("build.rs"),
-    include_str!("../assets/rumdl.toml"),
-    include_str!("../Cargo.lock"),
-];
-
-fn code_version() -> &'static str {
-    static VERSION: OnceLock<String> = OnceLock::new();
-    VERSION.get_or_init(|| {
-        let mut h = Sha1::new();
-        h.update(RUMDL.join(" "));
-        for source in RENDER_SOURCES {
-            h.update(source);
-            h.update([0]);
-        }
-        hex(&h.finalize())
-    })
-}
-
-fn canonical(v: &Value) -> String {
-    match v {
-        Value::Object(m) => {
-            let sorted: BTreeMap<&String, String> = m.iter().map(|(k, v)| (k, canonical(v))).collect();
-            let fields: Vec<String> = sorted.into_iter().map(|(k, v)| format!("{}:{v}", Value::String(k.clone()))).collect();
-            format!("{{{}}}", fields.join(","))
-        }
-        Value::Array(a) => format!("[{}]", a.iter().map(canonical).collect::<Vec<_>>().join(",")),
-        other => other.to_string(),
-    }
-}
-
-fn input_key(cache: &Cache, r: &Revision) -> anyhow::Result<String> {
-    let st = fs::metadata(cache.data_path(r.revision_id()))?;
-    let mtime = st.modified()?.duration_since(UNIX_EPOCH)?.as_nanos();
-    let meta = canonical(&json!([&*r.law_info, &r.rev]));
-    Ok(hex(&Sha1::digest(format!("{} {mtime} {meta}", st.len()))))
-}
-
-type Entry = (String, String, Counts);
-
-fn load_rendered(cache: &Cache, out: &Path, version: &str) -> anyhow::Result<HashMap<String, Entry>> {
-    let path = cache.root.join(RENDERED);
-    if !path.exists() || !out.join(MARKER).exists() {
-        return Ok(HashMap::new());
-    }
-    let doc: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
-    if doc["version"] != version {
-        return Ok(HashMap::new());
-    }
-    let entries: HashMap<String, Entry> = serde_json::from_value(doc["entries"].clone())?;
-    let mut p = Command::new("git")
-        .args(["cat-file", "--batch-check=%(objectname)"])
-        .current_dir(out)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()?;
-    let input: String = entries.values().map(|e| format!("{}\n", e.1)).collect();
-    let mut stdin = p.stdin.take().unwrap();
-    let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
-    let output = p.wait_with_output()?;
-    writer.join().unwrap()?;
-    let present: HashSet<&str> = std::str::from_utf8(&output.stdout)?.lines().filter(|l| !l.ends_with(" missing")).collect();
-    Ok(entries.into_iter().filter(|(_, e)| present.contains(e.1.as_str())).collect())
 }
 
 fn render(cache: &Cache, objects: &Path, r: &Revision, lint_file: Option<&Path>) -> anyhow::Result<(String, Counts)> {
@@ -206,7 +124,7 @@ fn render_all(cache: &Cache, objects: &Path, todo: &[(&Revision, Option<PathBuf>
 
 struct Streamed {
     files: usize,
-    entries: BTreeMap<String, Entry>,
+    entries: Entries,
     unknown: Counts,
 }
 
@@ -214,7 +132,7 @@ fn stream(cache: &Cache, staging: &Path, main: &[Group], upcoming: &[Group], lin
     let all: Vec<&Revision> = main.iter().chain(upcoming).flat_map(|g| &g.revisions).filter(|r| !r.repealed()).collect();
     let mut keys = HashMap::new();
     for r in &all {
-        keys.insert(r.revision_id().to_string(), input_key(cache, r)?);
+        keys.insert(r.revision_id().to_string(), reuse::input_key(cache, r)?);
     }
     let hits: HashMap<&str, &Entry> =
         all.iter().filter_map(|r| previous.get(r.revision_id()).filter(|e| e.0 == keys[r.revision_id()]).map(|e| (r.revision_id(), e))).collect();
@@ -233,7 +151,7 @@ fn stream(cache: &Cache, staging: &Path, main: &[Group], upcoming: &[Group], lin
             ref_: "refs/heads/main",
             date: &root_date,
             message: "リポジトリの初期化\n",
-            files: BTreeMap::from([("README.md".to_string(), README.to_string()), (".rumdl.toml".to_string(), RUMDL_TOML.to_string())]),
+            files: BTreeMap::from([("README.md".to_string(), README.to_string()), (".rumdl.toml".to_string(), lint::CONFIG.to_string())]),
             ..Default::default()
         })?;
         let mut out = Streamed { files: 0, entries: BTreeMap::new(), unknown: Counts::new() };
@@ -283,31 +201,6 @@ fn stream(cache: &Cache, staging: &Path, main: &[Group], upcoming: &[Group], lin
     Ok(out)
 }
 
-fn copy_remote_config(old: &Path, new: &Path) -> anyhow::Result<()> {
-    if !old.join(".git").exists() {
-        return Ok(());
-    }
-    let found = Command::new("git").args(["config", "--local", "--get-regexp", r"^(remote|branch)\."]).current_dir(old).output()?;
-    for line in String::from_utf8(found.stdout)?.lines() {
-        if let Some((key, value)) = line.split_once(' ') {
-            git(new, &["config", "--add", key, value])?;
-        }
-    }
-    Ok(())
-}
-
-fn lint(lint_dir: &Path, rumdl: &[String]) -> anyhow::Result<(bool, String)> {
-    fs::create_dir_all(lint_dir)?;
-    fs::write(lint_dir.join(".rumdl.toml"), RUMDL_TOML)?;
-    let out = Command::new(&rumdl[0])
-        .args(&rumdl[1..])
-        .args(["check", "--no-cache", "--respect-gitignore=false", "."])
-        .current_dir(lint_dir)
-        .output()
-        .with_context(|| format!("running {}", rumdl.join(" ")))?;
-    Ok((out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr)))
-}
-
 pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
     let name = out.file_name().context("output path has no name")?.to_string_lossy();
     let staging = out.with_file_name(format!("{name}.building"));
@@ -315,10 +208,10 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
         bail!("{} is not empty and not a previous build; refusing to touch it", out.display());
     }
     prepare(&staging)?;
-    let version = o.code_version.clone().unwrap_or_else(|| code_version().to_string());
+    let version = o.code_version.clone().unwrap_or_else(|| reuse::code_version().to_string());
     let lint_dir = cache.root.join("lint");
     let result = (|| -> anyhow::Result<Report> {
-        let previous = load_rendered(cache, out, &version)?;
+        let previous = if out.join(MARKER).exists() { reuse::load(cache, out, &version)? } else { HashMap::new() };
         let alternates = staging.join(".git/objects/info/alternates");
         if !previous.is_empty() {
             fs::write(&alternates, format!("{}\n", fs::canonicalize(out.join(".git/objects"))?.display()))?;
@@ -330,10 +223,10 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
             fs::create_dir_all(&lint_dir)?;
         }
         let streamed = stream(cache, &staging, &main, &upcoming, o.lint.then_some(lint_dir.as_path()), o.jobs, &previous)?;
-        git(&staging, &["reset", "-q", "--hard", "main"])?;
+        git::run(&staging, &["reset", "-q", "--hard", "main"])?;
         // Loose and borrowed blobs → one delta-compressed pack, while lint runs on the same files.
         let mut repack = Command::new("git").args(["repack", "-adq"]).current_dir(&staging).spawn()?;
-        let linted = if o.lint { Some(lint(&lint_dir, &o.rumdl)) } else { None };
+        let linted = if o.lint { Some(lint::run(&lint_dir, &o.rumdl)) } else { None };
         if !repack.wait()?.success() {
             bail!("git repack failed");
         }
@@ -357,14 +250,13 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
             }
             report.lint = "ok";
         }
-        copy_remote_config(out, &staging)?;
+        git::copy_remote_config(out, &staging)?;
         clear(out)?;
         fs::remove_dir(out)?;
         fs::rename(&staging, out)?;
         if o.lint {
             // entries from a --no-lint build were never linted, so they must not skip lint later
-            let doc = json!({"version": version, "entries": streamed.entries});
-            fs::write(cache.root.join(RENDERED), serde_json::to_string(&doc)?)?;
+            reuse::save(cache, &version, &streamed.entries)?;
         }
         Ok(report)
     })();
@@ -381,11 +273,10 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::render_law;
     use crate::testutil::{fixture_cache, LAW_ID};
 
     fn sh(repo: &Path, args: &[&str]) -> String {
-        git(repo, args).unwrap()
+        git::run(repo, args).unwrap()
     }
 
     fn opts(lint: bool, jobs: usize) -> Options {
@@ -405,7 +296,7 @@ mod tests {
         let md = sh(&out, &["show", "main:laws/act/323/323AC1000000178.md"]);
         assert!(md.starts_with("---\nlaw_id: \"323AC1000000178\"\n") && md.contains("# 国民の祝日に関する法律"));
         assert!(report.commits_main == 3 && report.excluded.is_empty() && report.skipped.is_empty());
-        assert!(git(&out, &["rev-parse", "--verify", "-q", "upcoming"]).is_err());
+        assert!(git::run(&out, &["rev-parse", "--verify", "-q", "upcoming"]).is_err());
         assert!(out.join("laws/act/323/323AC1000000178.md").exists()); // working tree checked out
     }
 
@@ -561,28 +452,5 @@ mod tests {
         let f = fs::File::options().write(true).open(&path).unwrap();
         f.set_modified(fs::metadata(&path).unwrap().modified().unwrap() + std::time::Duration::from_nanos(1)).unwrap();
         assert_eq!(build(&cache, &out, &opts(true, 1)).unwrap().rendered, 1);
-    }
-
-    #[test]
-    fn table_fixture_passes_shipped_rumdl_config() {
-        let d = tempfile::tempdir().unwrap();
-        let xml = crate::testutil::fixture_xmls().pop().unwrap();
-        let target = d.path().join("laws/act/x.md");
-        fs::create_dir_all(target.parent().unwrap()).unwrap();
-        fs::write(&target, render_law(&xml).unwrap().markdown).unwrap();
-        let rumdl: Vec<String> = RUMDL.iter().map(|s| s.to_string()).collect();
-        let (ok, output) = lint(d.path(), &rumdl).unwrap();
-        assert!(ok, "{output}");
-    }
-
-    #[test]
-    fn shipped_rumdl_config_rejects_a_skipped_heading_level() {
-        let d = tempfile::tempdir().unwrap();
-        let target = d.path().join("laws/act/x.md");
-        fs::create_dir_all(target.parent().unwrap()).unwrap();
-        fs::write(&target, "# 法\n\n### 第一条\n\n本文\n").unwrap();
-        let rumdl: Vec<String> = RUMDL.iter().map(|s| s.to_string()).collect();
-        let (ok, output) = lint(d.path(), &rumdl).unwrap();
-        assert!(!ok && output.contains("MD001"), "{output}");
     }
 }
