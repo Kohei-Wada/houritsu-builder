@@ -141,7 +141,8 @@ mod tests {
     fn undetermined_enforcement_and_its_comment() {
         let mut r = rev();
         r["amendment_enforcement_date"] = json!("2117-12-31");
-        r["amendment_enforcement_comment"] = json!("公布の日から起算して三年を超えない範囲内において政令で定める日");
+        r["amendment_enforcement_comment"] =
+            json!("公布の日から起算して三年を超えない範囲内において政令で定める日");
         assert!(frontmatter(&law_info(), &r).contains(
             "  enforced: \"undetermined\"\n  \
              enforcement_comment: \"公布の日から起算して三年を超えない範囲内において政令で定める日\"\n\

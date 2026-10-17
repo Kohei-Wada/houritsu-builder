@@ -166,7 +166,8 @@ impl Renderer {
         let (title, caption) = (find(el, "ArticleTitle"), find(el, "ArticleCaption"));
         self.heading(
             level,
-            title.map(|e| self.inline(e)).unwrap_or_default() + &caption.map(|e| self.inline(e)).unwrap_or_default(),
+            title.map(|e| self.inline(e)).unwrap_or_default()
+                + &caption.map(|e| self.inline(e)).unwrap_or_default(),
         );
         for child in elements(el) {
             if same(title, child) || same(caption, child) {
@@ -183,9 +184,10 @@ impl Renderer {
     fn sentence(&self, el: Option<El>) -> String {
         match el {
             None => String::new(),
-            Some(el) if find(el, "Column").is_some() => {
-                elements(el).map(|e| self.inline(e)).collect::<Vec<_>>().join(" ")
-            }
+            Some(el) if find(el, "Column").is_some() => elements(el)
+                .map(|e| self.inline(e))
+                .collect::<Vec<_>>()
+                .join(" "),
             Some(el) => self.inline(el),
         }
     }
@@ -383,7 +385,10 @@ impl Renderer {
 
     fn suppl(&mut self, el: El) {
         let label = find(el, "SupplProvisionLabel");
-        self.heading(2, label.map(|e| self.inline(e)).unwrap_or_default() + &suppl_source(el));
+        self.heading(
+            2,
+            label.map(|e| self.inline(e)).unwrap_or_default() + &suppl_source(el),
+        );
         for child in elements(el) {
             if same(label, child) {
                 continue;
@@ -407,7 +412,10 @@ impl Renderer {
                 [title_tag.as_str(), "RelatedArticleNum", "ArithFormulaNum"].contains(&tag(**c))
             })
             .count();
-        self.heading(level, children[..n].iter().map(|c| self.inline(*c)).collect());
+        self.heading(
+            level,
+            children[..n].iter().map(|c| self.inline(*c)).collect(),
+        );
         for &child in &children[n..] {
             match tag(child) {
                 "TableStruct" => self.table(child, ""),

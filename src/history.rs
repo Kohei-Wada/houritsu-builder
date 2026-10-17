@@ -416,7 +416,14 @@ mod tests {
 
     #[test]
     fn undetermined_enforcement_is_not_shown_as_a_date() {
-        let mut r = rev("A", "Z", Some("2117-12-31"), "2026-06-01", "UnEnforced", "法");
+        let mut r = rev(
+            "A",
+            "Z",
+            Some("2117-12-31"),
+            "2026-06-01",
+            "UnEnforced",
+            "法",
+        );
         r.rev["amendment_enforcement_comment"] = json!("政令で定める日");
         let (_, upcoming) = plan(vec![r]);
         let m = upcoming[0].message(&Bills::default());
