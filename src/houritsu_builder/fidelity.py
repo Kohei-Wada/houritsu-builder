@@ -8,15 +8,17 @@ _FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
 _PREFIX = re.compile(r"^(#{1,6} | *- | *-$)")
 _ARTICLE_PARENTS = {"MainProvision", "SupplProvision", *CONTAINERS}
 _TAGS = re.compile(r"</?(ruby|rt|sup|sub)>")
+_ESCAPE = re.compile(r"^( *)\\(?=[-+*#>=\d])")
 
 
 class FidelityError(Exception):
     pass
 
 
-def _walk(el: ET.Element, out: list[str], parent: str = "") -> None:
+def _walk(el: ET.Element, out: list[str], parent: str = "", quoted: bool = False) -> None:
     children = list(el)
-    if el.tag == "Article" and parent in _ARTICLE_PARENTS:  # rendered as title then caption
+    quoted = quoted or el.tag == "AmendProvision"  # rendered as plain text in document order
+    if el.tag == "Article" and parent in _ARTICLE_PARENTS and not quoted:  # rendered as title then caption
         caption = el.find("ArticleCaption")
         if caption is not None:
             children.remove(caption)
@@ -24,7 +26,7 @@ def _walk(el: ET.Element, out: list[str], parent: str = "") -> None:
             children.insert(title_at + 1, caption)
     out.append(el.text or "")
     for c in children:
-        _walk(c, out, el.tag)
+        _walk(c, out, el.tag, quoted)
         out.append(c.tail or "")
 
 
@@ -41,7 +43,7 @@ def xml_text(xml: bytes) -> str:
 
 def md_text(md: str) -> str:
     body = _FRONTMATTER.sub("", md, count=1)
-    return strip_ascii_ws("".join(_TAGS.sub("", _PREFIX.sub("", line)) for line in body.split("\n")))
+    return strip_ascii_ws("".join(_TAGS.sub("", _ESCAPE.sub(r"\1", _PREFIX.sub("", line))) for line in body.split("\n")))
 
 
 def check(xml: bytes, md: str, label: str) -> None:

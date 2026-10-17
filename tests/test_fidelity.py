@@ -62,3 +62,21 @@ def test_empty_item_marker_is_not_text():
            "<Item><ItemTitle>三</ItemTitle><ItemSentence><Sentence>号</Sentence></ItemSentence></Item>"
            "</Paragraph></MainProvision></LawBody></Law>").encode()
     check(xml, render_law(xml).markdown, "t")
+
+
+def test_markdown_markers_in_statute_text_are_escaped():
+    cells = "".join(f"<TableColumn><Sentence>{t}</Sentence></TableColumn>" for t in ("-", "# 注", "1. 一", "=", "> 引用"))
+    xml = (f"<Law><LawBody><MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>"
+           f"<Item><ItemSentence><Sentence>- 項目</Sentence></ItemSentence><TableStruct><Table><TableRow>{cells}</TableRow></Table></TableStruct></Item>"
+           f"</Paragraph></MainProvision></LawBody></Law>").encode()
+    md = render_law(xml).markdown
+    assert "\n\n  \\-\n\n" in md and "- \\- 項目" in md and "  \\# 注" in md and "\\1. 一" in md
+    check(xml, md, "x")
+
+
+def test_article_in_an_amend_provision_keeps_document_order_inside_a_chapter():
+    xml = ("<Law><LawBody><SupplProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>改める。</Sentence></ParagraphSentence>"
+           "<AmendProvision><NewProvision><Chapter><ChapterTitle>第七章の二</ChapterTitle><Article><ArticleCaption>（基準）</ArticleCaption>"
+           "<ArticleTitle>第百三十六条の二</ArticleTitle></Article></Chapter></NewProvision></AmendProvision>"
+           "</Paragraph></SupplProvision></LawBody></Law>").encode()
+    check(xml, render_law(xml).markdown, "x")

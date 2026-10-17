@@ -1,4 +1,5 @@
 import collections
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
@@ -7,6 +8,12 @@ from houritsu_builder.xmltext import inline
 CONTAINERS = ("Part", "Chapter", "Section", "Subsection", "Division")
 ITEMS = ("Item",) + tuple(f"Subitem{i}" for i in range(1, 11))
 SKIPPED_TAGS = {"TOC"}
+_MARKUP_START = re.compile(r"[-+*#>=]|\d+[.)]")
+
+
+def literal(text: str) -> str:
+    """Escape statute text that markdown would read as a list, heading, quote or setext underline."""
+    return "\\" + text if _MARKUP_START.match(text) else text
 
 
 @dataclass
@@ -30,7 +37,7 @@ class _Renderer:
 
     def fallback(self, el: ET.Element, indent: str = "") -> None:
         self.unknown[el.tag] += 1
-        self.block(indent + inline(el) if inline(el) else "")
+        self.block(indent + literal(inline(el)) if inline(el) else "")
 
     def body(self, body: ET.Element) -> None:
         for el in body:
@@ -39,7 +46,7 @@ class _Renderer:
             elif el.tag in SKIPPED_TAGS:
                 continue
             elif el.tag == "EnactStatement":
-                self.block(inline(el))
+                self.block(literal(inline(el)))
             elif el.tag == "Preamble":
                 for p in el:
                     if p.tag == "Paragraph":
@@ -92,9 +99,9 @@ class _Renderer:
     def paragraph(self, el: ET.Element) -> None:
         caption, num, sentence = el.find("ParagraphCaption"), el.find("ParagraphNum"), el.find("ParagraphSentence")
         if caption is not None:
-            self.block(inline(caption))
+            self.block(literal(inline(caption)))
         n = inline(num) if num is not None else ""
-        self.block(" ".join(t for t in (n, self.sentence(sentence)) if t))
+        self.block(literal(" ".join(t for t in (n, self.sentence(sentence)) if t)))
         for child in el:
             if child in (caption, num, sentence):
                 continue
@@ -112,7 +119,7 @@ class _Renderer:
     def item(self, el: ET.Element, depth: int) -> None:
         title, sentence = el.find(f"{el.tag}Title"), el.find(f"{el.tag}Sentence")
         text = " ".join(t for t in ((inline(title) if title is not None else ""), self.sentence(sentence)) if t)
-        self.block(("  " * depth + "- " + text).rstrip(" "))
+        self.block(("  " * depth + "- " + literal(text)).rstrip(" "))
         for child in el:
             if child is title or child is sentence:
                 continue
@@ -128,7 +135,7 @@ class _Renderer:
     def list_(self, el: ET.Element, depth: int) -> None:
         for child in el:
             if child.tag.endswith("Sentence"):
-                self.block(("  " * depth + "- " + self.sentence(child)).rstrip(" "))
+                self.block(("  " * depth + "- " + literal(self.sentence(child))).rstrip(" "))
             elif child.tag.startswith("Sublist"):
                 self.list_(child, depth + 1)
             else:
@@ -139,14 +146,14 @@ class _Renderer:
             if child.tag == "Fig":
                 self.unknown["Fig"] += 1
             else:
-                self.block(inline(child))
+                self.block(literal(inline(child)))
 
     def table(self, el: ET.Element, indent: str = "") -> None:
         for child in el:
             cells = [col for row in child for col in row] if child.tag == "Table" else [child]
             for text in map(inline, cells):
                 if text:
-                    self.block(indent + text)
+                    self.block(indent + literal(text))
 
     def suppl(self, el: ET.Element) -> None:
         label = el.find("SupplProvisionLabel")
