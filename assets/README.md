@@ -19,6 +19,20 @@ Information Protection Act, and `git show <commit>` is what one amendment change
 - A repealed law's file is deleted in the repealing law's commit; its history stays in
   `git log -- <file>`.
 
+## Limits
+
+- **History starts around 2015, not at enactment.** e-Gov's revision data ramps up from
+  about 2015 (a few hundred commits a year before, about two thousand a year from 2019), so
+  a time series of commit dates measures e-Gov's coverage as much as legislation.
+- **`git blame` dates the coverage, not the wording.** A law's oldest commit holds every
+  line that existed before coverage began: most of 刑法 blames to its 2016 commit. Read it
+  as "already there by then".
+- **Many laws have little history.** About a third of laws have a single commit.
+- **Commit SHAs are not stable before v1.0.** A rebuild keeps them only while the data
+  and the builder are unchanged; a builder change, or e-Gov adding a revision dated before
+  existing commits, rewrites every later SHA. Refer to a revision by its `law_id` and
+  `revision_id` (both in the frontmatter) instead.
+
 ## Finding a law
 
 File names are e-Gov law IDs, which stay the same when a title changes. Search the
