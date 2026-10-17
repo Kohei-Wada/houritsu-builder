@@ -135,7 +135,10 @@ impl Group {
             or_str(self.enforced.as_deref(), "unknown")
         ));
         if let Some(bill) = bills.for_law(&self.amendment_law_id) {
-            lines.push(format!("Bill: {} 第{}回国会 第{}号", bill.kind, bill.session, bill.number));
+            lines.push(format!(
+                "Bill: {} 第{}回国会 第{}号",
+                bill.kind, bill.session, bill.number
+            ));
             if !bill.url.is_empty() {
                 lines.push(format!("Bill-Url: {}", bill.url));
             }

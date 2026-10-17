@@ -171,7 +171,11 @@ fn stream(
     jobs: usize,
     previous: &HashMap<String, Entry>,
 ) -> anyhow::Result<Streamed> {
-    let History { main, upcoming, bills } = *history;
+    let History {
+        main,
+        upcoming,
+        bills,
+    } = *history;
     let all: Vec<&Revision> = main
         .iter()
         .chain(upcoming)
@@ -321,7 +325,11 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
             fs::create_dir_all(&lint_dir)?;
         }
         let bills = Bills::load(cache)?;
-        let history = History { main: &main, upcoming: &upcoming, bills: &bills };
+        let history = History {
+            main: &main,
+            upcoming: &upcoming,
+            bills: &bills,
+        };
         let streamed = stream(
             cache,
             &staging,

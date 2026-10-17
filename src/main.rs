@@ -85,7 +85,9 @@ fn main() -> anyhow::Result<()> {
                 full,
             };
             let cache = Cache::new(cache);
-            let stats = fetch(&Client::new(delay), &cache, &options, &|line| println!("{line}"))?;
+            let stats = fetch(&Client::new(delay), &cache, &options, &|line| {
+                println!("{line}")
+            })?;
             println!("{}", serde_json::to_string(&stats)?);
             if let Err(e) = bills::fetch(&cache) {
                 eprintln!("bill list not refreshed, keeping the previous one: {e:#}");
