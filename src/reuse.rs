@@ -79,11 +79,23 @@ pub fn load(cache: &Cache, repo: &Path, version: &str) -> anyhow::Result<HashMap
     if !path.exists() {
         return Ok(HashMap::new());
     }
-    let doc: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
-    if doc["version"] != version {
-        return Ok(HashMap::new());
-    }
-    let entries: HashMap<String, Entry> = serde_json::from_value(doc["entries"].clone())?;
+    // A damaged file only costs a full render, so it must not stop the build.
+    let parsed = fs::read_to_string(&path)
+        .map_err(anyhow::Error::from)
+        .and_then(|text| Ok(serde_json::from_str::<Value>(&text)?))
+        .and_then(|doc| {
+            Ok((doc["version"] == version)
+                .then(|| serde_json::from_value::<HashMap<String, Entry>>(doc["entries"].clone()))
+                .transpose()?)
+        });
+    let entries = match parsed {
+        Ok(Some(entries)) => entries,
+        Ok(None) => return Ok(HashMap::new()),
+        Err(e) => {
+            eprintln!("ignoring {}: {e:#}", path.display());
+            return Ok(HashMap::new());
+        }
+    };
     let present = crate::git::present(repo, entries.values().map(|e| e.1.as_str()))?;
     Ok(entries
         .into_iter()
@@ -92,9 +104,12 @@ pub fn load(cache: &Cache, repo: &Path, version: &str) -> anyhow::Result<HashMap
 }
 
 pub fn save(cache: &Cache, version: &str, entries: &Entries) -> anyhow::Result<()> {
+    let path = cache.root.join(FILE);
+    let tmp = path.with_extension("json.tmp");
     fs::write(
-        cache.root.join(FILE),
+        &tmp,
         serde_json::to_string(&json!({"version": version, "entries": entries}))?,
     )?;
+    fs::rename(tmp, path)?;
     Ok(())
 }

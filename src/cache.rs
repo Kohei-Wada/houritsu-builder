@@ -60,7 +60,8 @@ impl Cache {
         let size = gz.len().checked_sub(4).map_or(0, |i| {
             u32::from_le_bytes(gz[i..].try_into().unwrap()) as usize
         });
-        let mut raw = Vec::with_capacity(size);
+        // a damaged file's trailer is garbage: never reserve more than real JSON would need
+        let mut raw = Vec::with_capacity(size.min(gz.len().saturating_mul(64)));
         GzDecoder::new(gz.as_slice())
             .read_to_end(&mut raw)
             .with_context(|| path.display().to_string())?;
@@ -101,7 +102,10 @@ impl Cache {
             .lines()
             .filter(|l| !l.trim().is_empty())
         {
-            let f: Value = serde_json::from_str(line)?;
+            // a line cut short by a killed run says nothing
+            let Ok(f) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
             let error = match &f["error"] {
                 Value::String(s) => s.clone(),
                 other => other.to_string(),
