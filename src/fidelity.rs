@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::render::{law_body, parse, suppl_source, ATTACHMENT, CONTAINERS, SKIPPED_TAGS};
+use crate::render::{law_body, parse, suppl_source, ATTACHMENT, CONTAINERS, NO_IMAGE, SKIPPED_TAGS};
 use crate::xmltext::{elements, push_tail, push_text, retain_non_ascii_ws, tag, El};
 
 // Rare (after an escaping backslash); the per-line work below avoids Regex, whose shared cache serialises threads.
@@ -144,16 +144,17 @@ fn push_without_tags(line: &str, out: &mut String) {
     out.push_str(rest);
 }
 
-/// A line the renderer wrote for a figure: a link to an e-Gov attachment, not statute text.
-fn is_attachment_link(line: &str) -> bool {
+/// A line the renderer wrote for a figure (a link to its e-Gov attachment, or the mark for a
+/// missing one), not statute text.
+fn is_figure_line(line: &str) -> bool {
     let t = line.trim_start_matches(' ');
-    t.starts_with('[') && t.ends_with(')') && t.contains(&format!("]({ATTACHMENT}"))
+    t == NO_IMAGE || (t.starts_with('[') && t.ends_with(')') && t.contains(&format!("]({ATTACHMENT}")))
 }
 
 pub fn md_text(md: &str) -> String {
     let mut joined = String::with_capacity(md.len());
     for line in without_frontmatter(md).split('\n') {
-        if !is_attachment_link(line) {
+        if !is_figure_line(line) {
             push_without_tags(unescape(strip_prefix(line)), &mut joined);
         }
     }
