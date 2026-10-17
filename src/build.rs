@@ -22,6 +22,8 @@ use crate::reuse::{self, Entries, Entry};
 
 const MARKER: &str = ".git/houritsu-build";
 const README: &str = include_str!("../assets/README.md");
+// git's built-in markdown diff driver names the enclosing heading (the article) in hunk headers.
+const GITATTRIBUTES: &str = "*.md diff=markdown\n";
 
 pub struct Options {
     pub law_type: Option<String>,
@@ -250,6 +252,7 @@ fn stream(
             files: BTreeMap::from([
                 ("README.md".to_string(), README.to_string()),
                 (".rumdl.toml".to_string(), lint::CONFIG.to_string()),
+                (".gitattributes".to_string(), GITATTRIBUTES.to_string()),
             ]),
             ..Default::default()
         })?;
@@ -458,6 +461,7 @@ mod tests {
         );
         assert!(git::run(&out, &["rev-parse", "--verify", "-q", "upcoming"]).is_err());
         assert!(out.join("laws/act/323/323AC1000000178.md").exists()); // working tree checked out
+        assert_eq!(sh(&out, &["show", "main:.gitattributes"]), "*.md diff=markdown\n");
     }
 
     #[test]
@@ -590,7 +594,6 @@ mod tests {
             r["amendment_law_id"] = json!("999AC0000000001");
             r["amendment_law_title"] = json!("国民の祝日に関する法律を廃止する法律");
             r["current_revision_status"] = json!("Repeal");
-            r["repeal_status"] = json!("Repeal");
             revs.insert(0, r);
         });
         let out = d.path().join("out");

@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::render::{law_body, parse, CONTAINERS, SKIPPED_TAGS};
+use crate::render::{law_body, parse, suppl_source, CONTAINERS, SKIPPED_TAGS};
 use crate::xmltext::{elements, push_tail, push_text, retain_non_ascii_ws, tag, El};
 
 // Rare (after an escaping backslash); the per-line work below avoids Regex, whose shared cache serialises threads.
@@ -42,8 +42,17 @@ fn walk(el: El, out: &mut String, parent: &str, quoted: bool) {
         }
     }
     push_text(el, out);
+    // the 附則 heading of the body also names its amending law (render::suppl_source)
+    let source = if t == "SupplProvision" && parent.is_empty() { suppl_source(el) } else { String::new() };
+    let has_label = children.iter().any(|c| tag(*c) == "SupplProvisionLabel");
+    if !has_label {
+        out.push_str(&source);
+    }
     for c in children {
         walk(c, out, t, quoted);
+        if tag(c) == "SupplProvisionLabel" {
+            out.push_str(&source);
+        }
         push_tail(c, out);
     }
 }

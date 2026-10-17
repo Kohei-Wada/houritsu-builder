@@ -122,7 +122,11 @@ enforcement date is the repeal date. That revision deletes the file in the
 repealing law's commit, so `HEAD` holds only laws in force and `git log -- <file>`
 still shows the whole life of a law. Laws repealed but kept in force for transition
 (`remain_in_force`) are deleted too. A repeal of a law with no earlier revision in
-the data adds nothing, and later `Repeal` revisions of a deleted law are ignored.
+the data adds nothing, and any
+later revision of a repealed law is ignored, even one dated the same day under a higher
+amending-law ID (e-Gov lists it as enforced just before the repeal; 独立行政法人国立女性教育会館法
+on 2026-04-01 was the one case). The frontmatter has no repeal field: a file exists only
+while its law is in force.
 
 ## Repository layout (houritsu)
 
@@ -134,6 +138,7 @@ laws/
   constitution/  rule/  …
 README.md
 .rumdl.toml
+.gitattributes   # *.md diff=markdown: hunk headers name the enclosing article
 ```
 
 - Directory: the e-Gov `law_type`, lower-kebab-cased (the first type when e-Gov lists
@@ -167,7 +172,6 @@ amendment:
   title: 日本学術会議法
   promulgated: 2025-06-18
   enforced: 2026-10-01
-repeal_status: None
 source: https://laws.e-gov.go.jp/law/415AC0000000057
 ---
 ```
@@ -182,6 +186,9 @@ Keys are stable across builds; tools may rely on them.
 - Paragraphs (項) become paragraphs; items (号) and sub-items become nested lists.
 - Supplementary provisions (附則) and appended tables (別表) are included from the
   first version. Complex tables are first rendered as text and improved later.
+- A 附則 of an amending law is headed with that law's number as e-Gov shows it,
+  `## 附　則（平成一九年三月三一日法律第二三号）`, from the XML's `AmendLawNum`; the law's own
+  附則 has none. Without it all 160,580 附則 headings were the same string.
 - Statute text is not changed: full-width digits, brackets and spacing are kept.
 
 ## Commit format

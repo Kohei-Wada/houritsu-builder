@@ -220,13 +220,19 @@ fn drop_redundant_repeals(mut revisions: Vec<Revision>) -> Vec<Revision> {
         };
         key(a).cmp(&key(b))
     });
-    let mut alive = HashSet::new();
+    // A repeal is final: a later revision, even one dated the same day under a higher
+    // amending-law ID (e-Gov lists that one as enforced just before the repeal), is dropped.
+    let (mut alive, mut repealed) = (HashSet::new(), HashSet::new());
     let mut kept = vec![];
     for r in revisions {
+        if repealed.contains(&r.law_id) {
+            continue;
+        }
         if r.repealed() {
             if !alive.remove(&r.law_id) {
                 continue;
             }
+            repealed.insert(r.law_id.clone());
         } else {
             alive.insert(r.law_id.clone());
         }
@@ -469,6 +475,18 @@ mod tests {
         assert!(main[1]
             .message(&Bills::default())
             .contains("- 法（A号）（廃止）\n- 乙法（B号）\n"));
+    }
+
+    #[test]
+    fn a_same_day_revision_does_not_bring_a_repealed_law_back() {
+        let (main, _) = plan(vec![
+            r("A", "Y", "2020-04-01"),
+            rev("A", "Z1", Some("2026-04-01"), "2020-01-01", "Repeal", "法"),
+            r("A", "Z2", "2026-04-01"),
+            r("A", "Z3", "2027-04-01"),
+        ]);
+        let got: Vec<_> = main.iter().map(|g| (g.amendment_law_id.as_str(), g.revisions[0].repealed())).collect();
+        assert_eq!(got, [("Y", false), ("Z1", true)]);
     }
 
     #[test]

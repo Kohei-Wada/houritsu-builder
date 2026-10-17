@@ -49,7 +49,6 @@ pub fn frontmatter(law_info: &Value, rev: &Value) -> String {
     ] {
         out.push(format!("  {k}: {}", v(rev.get(key))));
     }
-    out.push(format!("repeal_status: {}", v(rev.get("repeal_status"))));
     out.push(format!(
         "source: {}",
         json_str(&format!("https://laws.e-gov.go.jp/law/{law_id}"))
@@ -107,7 +106,6 @@ mod tests {
              title: \"日本学術会議法\"\n  \
              promulgated: 2025-06-18\n  \
              enforced: 2026-10-01\n\
-             repeal_status: \"None\"\n\
              source: \"https://laws.e-gov.go.jp/law/415AC0000000057\"\n\
              ---\n\n"
         );

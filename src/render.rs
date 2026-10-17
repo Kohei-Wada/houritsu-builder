@@ -269,7 +269,7 @@ impl Renderer {
 
     fn suppl(&mut self, el: El) {
         let label = find(el, "SupplProvisionLabel");
-        self.heading(2, label.map(inline).unwrap_or_default());
+        self.heading(2, label.map(inline).unwrap_or_default() + &suppl_source(el));
         for child in elements(el) {
             if same(label, child) {
                 continue;
@@ -303,6 +303,12 @@ impl Renderer {
             }
         }
     }
+}
+
+/// `（平成一九年三月三一日法律第二三号）` for the 附則 of an amending law, so each block is
+/// identifiable; the law's own 附則 has none. Written as e-Gov 法令検索 shows it.
+pub fn suppl_source(el: El) -> String {
+    el.attribute("AmendLawNum").filter(|n| !n.is_empty()).map(|n| format!("（{n}）")).unwrap_or_default()
 }
 
 pub fn parse(xml: &str) -> anyhow::Result<roxmltree::Document<'_>> {
@@ -378,6 +384,18 @@ pub(crate) mod tests {
             para("公布の日から施行する。", "")
         ));
         assert!(md(&xml).ends_with("## 附　則\n\n公布の日から施行する。\n"));
+    }
+
+    #[test]
+    fn suppl_provision_of_an_amending_law_names_it() {
+        let xml = law(&format!(
+            "<MainProvision>{}</MainProvision><SupplProvision AmendLawNum=\"平成一九年三月三一日法律第二三号\" Extract=\"true\">\
+             <SupplProvisionLabel>附　則</SupplProvisionLabel>{}</SupplProvision>",
+            para("本則。", ""),
+            para("公布の日から施行する。", "")
+        ));
+        let r = checked(&xml);
+        assert!(r.markdown.ends_with("## 附　則（平成一九年三月三一日法律第二三号）\n\n公布の日から施行する。\n"));
     }
 
     #[test]
