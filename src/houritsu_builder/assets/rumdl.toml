@@ -2,6 +2,7 @@
 include = ["laws/**/*.md"]
 disable = [
   "MD009",  # lone U+3000 table cells are statute text; U+3000 counts as whitespace
+  "MD010",  # statute text may contain tabs
   "MD012",  # same: a lone U+3000 line counts as blank
   "MD013",  # statute sentences are long by nature
   "MD024",  # every 附則 has the same heading

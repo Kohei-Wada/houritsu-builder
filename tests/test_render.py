@@ -90,7 +90,7 @@ def test_empty_sentence_paragraph_has_no_trailing_space():
 def test_empty_item_has_no_trailing_space():
     xml = law("<MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>"
               "<Item><ItemTitle/><ItemSentence/><Subitem1><Subitem1Title/><Subitem1Sentence/></Subitem1></Item></Paragraph></MainProvision>")
-    assert render_law(xml).markdown.endswith("本文。\n\n-\n\n  -\n")
+    assert render_law(xml).markdown.endswith("本文。\n\n-\n")
 
 
 def _fixture_xmls():
@@ -179,3 +179,12 @@ def test_table_and_unknown_inside_item_stay_in_the_list():
               "</Item></Paragraph></MainProvision>")
     r = _checked(xml)
     assert r.markdown.endswith("- 一 本\n\n  - イ 甲\n\n    表\n\n    元日\n\n    一月一日\n\n    備考\n\n  - ロ 乙\n")
+
+
+def test_children_of_an_empty_item_take_its_place():
+    xml = ("<Law><LawBody><MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>"
+           "<Item><ItemTitle>一</ItemTitle><ItemSentence><Sentence>号。</Sentence></ItemSentence>"
+           "<Subitem1><Subitem1Sentence/><Subitem2><Subitem2Sentence><Sentence>式</Sentence></Subitem2Sentence></Subitem2></Subitem1>"
+           "<Subitem1><Subitem1Sentence/></Subitem1></Item>"
+           "</Paragraph></MainProvision></LawBody></Law>").encode()
+    assert render_law(xml).markdown == "本文。\n\n- 一 号。\n\n  - 式\n\n  -\n"

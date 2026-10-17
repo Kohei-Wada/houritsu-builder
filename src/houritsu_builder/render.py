@@ -119,18 +119,20 @@ class _Renderer:
     def item(self, el: ET.Element, depth: int) -> None:
         title, sentence = el.find(f"{el.tag}Title"), el.find(f"{el.tag}Sentence")
         text = " ".join(t for t in ((inline(title) if title is not None else ""), self.sentence(sentence)) if t)
-        self.block(("  " * depth + "- " + literal(text)).rstrip(" "))
-        for child in el:
-            if child is title or child is sentence:
-                continue
+        children = [c for c in el if c is not title and c is not sentence]
+        if text or not children:
+            self.block(("  " * depth + "- " + literal(text)).rstrip(" "))
+            depth += 1
+        # else: markdown cannot nest under an empty item, so its children take its place
+        for child in children:
             if child.tag in ITEMS:
-                self.item(child, depth + 1)
+                self.item(child, depth)
             elif child.tag == "TableStruct":
-                self.table(child, "  " * (depth + 1))
+                self.table(child, "  " * depth)
             elif child.tag == "List":
-                self.list_(child, depth + 1)
+                self.list_(child, depth)
             else:
-                self.fallback(child, "  " * (depth + 1))
+                self.fallback(child, "  " * depth)
 
     def list_(self, el: ET.Element, depth: int) -> None:
         for child in el:
