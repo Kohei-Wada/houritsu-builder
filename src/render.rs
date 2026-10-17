@@ -59,12 +59,21 @@ struct Renderer {
 }
 
 /// Containers of a 様式, 書式, 注記 or 図: a title, remarks and the body, rendered part by part.
-const STRUCTS: [&str; 7] = ["StyleStruct", "FormatStruct", "NoteStruct", "FigStruct", "Style", "Format", "Note"];
+const STRUCTS: [&str; 7] = [
+    "StyleStruct",
+    "FormatStruct",
+    "NoteStruct",
+    "FigStruct",
+    "Style",
+    "Format",
+    "Note",
+];
 
 pub const ATTACHMENT: &str = "https://laws.e-gov.go.jp/api/2/attachment/";
 
 fn has_loose_text(el: El) -> bool {
-    el.children().any(|c| c.is_text() && !c.text().unwrap_or("").trim().is_empty())
+    el.children()
+        .any(|c| c.is_text() && !c.text().unwrap_or("").trim().is_empty())
 }
 
 fn same(a: Option<El>, b: El) -> bool {
@@ -304,21 +313,38 @@ impl Renderer {
         for row in elements(el) {
             lines.push("<tr>".to_string());
             for col in elements(row) {
-                let cell = if tag(col) == "TableHeaderColumn" { "th" } else { "td" };
+                let cell = if tag(col) == "TableHeaderColumn" {
+                    "th"
+                } else {
+                    "td"
+                };
                 let mut attrs = String::new();
                 for name in ["rowspan", "colspan"] {
                     if let Some(n) = col.attribute(name).filter(|n| !n.is_empty() && *n != "1") {
                         attrs.push_str(&format!(" {name}=\"{n}\""));
                     }
                 }
-                let parts: Vec<String> = elements(col).map(inline).filter(|t| !t.is_empty()).collect();
-                let content = if has_loose_text(col) || parts.is_empty() { inline(col) } else { parts.join("<br>") };
+                let parts: Vec<String> = elements(col)
+                    .map(inline)
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                let content = if has_loose_text(col) || parts.is_empty() {
+                    inline(col)
+                } else {
+                    parts.join("<br>")
+                };
                 lines.push(format!("<{cell}{attrs}>{content}</{cell}>"));
             }
             lines.push("</tr>".to_string());
         }
         lines.push("</table>".to_string());
-        self.block(lines.iter().map(|l| format!("{indent}{l}")).collect::<Vec<_>>().join("\n"));
+        self.block(
+            lines
+                .iter()
+                .map(|l| format!("{indent}{l}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
     }
 
     fn suppl(&mut self, el: El) {
@@ -503,7 +529,10 @@ pub(crate) mod tests {
         ));
         assert!(r.unknown.is_empty(), "{:?}", r.unknown);
         check(&xml, &r.markdown, "t").unwrap();
-        assert_eq!(render_law(&xml).unwrap().unknown, Counts::from([("Fig".to_string(), 1)]));
+        assert_eq!(
+            render_law(&xml).unwrap().unknown,
+            Counts::from([("Fig".to_string(), 1)])
+        );
     }
 
     #[test]
@@ -533,7 +562,9 @@ pub(crate) mod tests {
              <Sentence>項目</Sentence></TableColumn></TableRow></Table></TableStruct></AppdxTable>",
             para("本文。", "")
         ));
-        assert!(md(&xml).ends_with("## 別表第一（第二条関係）\n\n<table>\n<tr>\n<td>項目</td>\n</tr>\n</table>\n"));
+        assert!(md(&xml).ends_with(
+            "## 別表第一（第二条関係）\n\n<table>\n<tr>\n<td>項目</td>\n</tr>\n</table>\n"
+        ));
     }
 
     #[test]

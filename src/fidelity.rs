@@ -121,7 +121,9 @@ const TAGS: [&str; 9] = ["ruby", "rt", "sup", "sub", "table", "tr", "th", "td", 
 fn tag_len(s: &str) -> Option<usize> {
     let name = s.strip_prefix('<')?;
     let name = name.strip_prefix('/').unwrap_or(name);
-    let t = TAGS.iter().find(|t| name.starts_with(**t) && name[t.len()..].starts_with(['>', ' ']))?;
+    let t = TAGS
+        .iter()
+        .find(|t| name.starts_with(**t) && name[t.len()..].starts_with(['>', ' ']))?;
     let after = &name[t.len()..];
     Some(s.len() - after.len() + after.find('>')? + 1)
 }
@@ -218,7 +220,10 @@ mod tests {
         push_without_tags("a<ruby>漢<rt>かん</rt></ruby><b>x</sup>", &mut out);
         assert_eq!(out, "a漢かん<b>x");
         let mut out = String::new();
-        push_without_tags("<tr><td rowspan=\"2\">甲<br>乙</td><th>丙</th></tr><trx><tdd>", &mut out);
+        push_without_tags(
+            "<tr><td rowspan=\"2\">甲<br>乙</td><th>丙</th></tr><trx><tdd>",
+            &mut out,
+        );
         assert_eq!(out, "甲乙丙<trx><tdd>");
     }
 
