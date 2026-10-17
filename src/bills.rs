@@ -119,6 +119,7 @@ impl Bills {
 pub fn fetch(cache: &Cache) -> anyhow::Result<()> {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(120))
+        .user_agent(crate::api::USER_AGENT)
         .build();
     let mut body = Vec::new();
     agent

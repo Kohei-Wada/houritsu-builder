@@ -5,6 +5,11 @@ use serde_json::Value;
 
 pub const BASE: &str = "https://laws.e-gov.go.jp/api/2";
 const BACKOFF: f64 = 2.0;
+pub const USER_AGENT: &str = concat!(
+    "houritsu-builder/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/Kohei-Wada/houritsu-builder)"
+);
 
 #[derive(Debug)]
 pub struct ApiError(pub String);
@@ -67,6 +72,7 @@ impl Client {
     pub fn new(delay: f64) -> Self {
         let agent = ureq::AgentBuilder::new()
             .timeout(Duration::from_secs(120))
+            .user_agent(USER_AGENT)
             .build();
         Self::with(
             BASE,
