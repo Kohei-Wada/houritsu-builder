@@ -14,11 +14,11 @@ use crate::cache::Cache;
 use crate::fastimport::{write_blob, Commit, Stream};
 use crate::fidelity::check_doc;
 use crate::frontmatter::frontmatter;
+use crate::git;
 use crate::history::{load_revisions, plan, Group, Revision};
+use crate::lint::{self, Linter};
 use crate::render::{parse, render_doc, Counts};
 use crate::reuse::{self, Entries, Entry};
-use crate::git;
-use crate::lint::{self, Linter};
 
 const MARKER: &str = ".git/houritsu-build";
 const README: &str = include_str!("../assets/README.md");
@@ -134,7 +134,14 @@ fn render(
     check_doc(&doc, &rendered.markdown, r.revision_id())?;
     let text = frontmatter(&r.law_info, &r.rev) + &rendered.markdown;
     let warnings = match linter {
-        Some(l) => l.check(&format!("{}/{}.md", r.path().trim_end_matches(".md"), r.revision_id()), &text)?,
+        Some(l) => l.check(
+            &format!(
+                "{}/{}.md",
+                r.path().trim_end_matches(".md"),
+                r.revision_id()
+            ),
+            &text,
+        )?,
         None => vec![],
     };
     Ok(Rendered {
@@ -207,9 +214,17 @@ fn stream(
                 .map(|e| (r.revision_id(), e))
         })
         .collect();
-    let todo: Vec<&Revision> = all.iter().copied().filter(|r| !hits.contains_key(r.revision_id())).collect();
+    let todo: Vec<&Revision> = all
+        .iter()
+        .copied()
+        .filter(|r| !hits.contains_key(r.revision_id()))
+        .collect();
     let rendered = render_all(cache, &staging.join(".git/objects"), &todo, linter, jobs)?;
-    let warnings: Vec<&str> = rendered.iter().flat_map(|r| &r.warnings).map(String::as_str).collect();
+    let warnings: Vec<&str> = rendered
+        .iter()
+        .flat_map(|r| &r.warnings)
+        .map(String::as_str)
+        .collect();
     if !warnings.is_empty() {
         let log = warnings.join("\n") + "\n";
         fs::write(cache.root.join("lint.log"), &log)?;
@@ -522,6 +537,13 @@ mod tests {
         assert!(fs::read_to_string(cache.root.join("lint.log"))
             .unwrap()
             .contains("[MD013]"));
+    }
+
+    fn edit_revisions(cache: &Cache, f: impl FnOnce(&mut Vec<Value>)) {
+        let path = cache.revisions_path(LAW_ID);
+        let mut doc = cache.read(&path).unwrap();
+        f(doc["revisions"].as_array_mut().unwrap());
+        cache.write(&path, &doc).unwrap();
     }
 
     #[test]
