@@ -61,7 +61,7 @@ def test_fetch_takes_never_fetched_laws_first(tmp_path):
         "law_revisions/A": revs("A"),
         "law_revisions/B": revs("B"),
     })
-    fetch(client, cache, log=lambda m: None)
+    fetch(client, cache, log=lambda m: None, full=True)
     assert client.calls == ["laws", "law_revisions/B", "law_revisions/A"]
 
 
@@ -76,3 +76,65 @@ def test_fetch_in_parallel_gets_everything(tmp_path):
     stats = fetch(FakeClient(routes), cache, log=lambda m: None, jobs=4)
     assert stats == {"laws": 19, "revisions": 38, "fetched": 38, "failed": 1}
     assert cache.read(cache.data_path("L7_2_Y")) == {"law_full_text": "L7"}
+
+
+def listed(law_id, rid, updated="u1"):
+    return {"law_info": {"law_id": law_id, "law_type": "Act"}, "revision_info": {"law_revision_id": rid, "updated": updated}}
+
+
+def rev(rid, amendment=None, status="CurrentEnforced", enforced="2020-01-01", updated="u1"):
+    return {"law_revision_id": rid, "amendment_law_id": amendment, "current_revision_status": status,
+            "amendment_enforcement_date": enforced, "updated": updated}
+
+
+def law_lists(now, future, by_amendment=None):
+    def route(p):
+        if "amendment_law_id" in p:
+            found = (by_amendment or {}).get(p["amendment_law_id"], [])
+        else:
+            found = future if p.get("asof") else now
+        return {"total_count": len(found), "laws": found}
+    return route
+
+
+def test_delta_refetches_only_laws_that_may_have_changed(tmp_path):
+    cache = Cache(tmp_path)
+    for law_id, revisions in {
+        "SAME": [rev("SAME_1")],
+        "NEWER": [rev("NEWER_1")],
+        "EDITED": [rev("EDITED_1")],
+        "DUE": [rev("DUE_2", status="UnEnforced", enforced="2000-01-01"), rev("DUE_1")],
+        "LATER": [rev("LATER_2", status="UnEnforced", enforced="9999-01-01"), rev("LATER_1")],
+    }.items():
+        cache.write(cache.revisions_path(law_id), {"law_info": {"law_id": law_id}, "revisions": revisions})
+    now = [listed("SAME", "SAME_1"), listed("NEWER", "NEWER_1"), listed("EDITED", "EDITED_1", "u2"),
+           listed("DUE", "DUE_1"), listed("LATER", "LATER_1"), listed("NEW", "NEW_1")]
+    future = [listed("SAME", "SAME_1"), listed("NEWER", "NEWER_2"), listed("EDITED", "EDITED_1", "u2"),
+              listed("DUE", "DUE_2"), listed("LATER", "LATER_2"), listed("NEW", "NEW_1")]
+    routes = {"laws": law_lists(now, future)}
+    for law_id in ("NEWER", "EDITED", "DUE", "NEW"):
+        routes[f"law_revisions/{law_id}"] = {"law_info": {"law_id": law_id}, "revisions": []}
+    client = FakeClient(routes)
+    fetch(client, cache, log=lambda m: None)
+    assert sorted(c for c in client.calls if c != "laws") == ["law_revisions/DUE", "law_revisions/EDITED", "law_revisions/NEW", "law_revisions/NEWER"]
+
+
+def test_delta_follows_a_new_amending_law_to_the_other_laws_it_amends(tmp_path):
+    cache = Cache(tmp_path)
+    cache.write(cache.revisions_path("A"), {"law_info": {"law_id": "A"}, "revisions": [rev("A_1", "X1")]})
+    cache.write(cache.revisions_path("B"), {"law_info": {"law_id": "B"}, "revisions": [rev("B_3", "X3"), rev("B_1", "X1")]})
+    now = [listed("A", "A_1"), listed("B", "B_1")]
+    future = [listed("A", "A_2"), listed("B", "B_3")]
+    client = FakeClient({
+        "laws": law_lists(now, future, {"X2": [listed("A", "A_2"), listed("B", "B_3")]}),
+        "law_revisions/A": {"law_info": {"law_id": "A"}, "revisions": [rev("A_2", "X2"), rev("A_1", "X1")]},
+        "law_revisions/B": {"law_info": {"law_id": "B"}, "revisions": [rev("B_3", "X3"), rev("B_2", "X2"), rev("B_1", "X1")]},
+        "law_data/A_2": {"law_full_text": "a"},
+        "law_data/B_2": {"law_full_text": "b"},
+        "law_data/A_1": {"law_full_text": "a"},
+        "law_data/B_1": {"law_full_text": "b"},
+        "law_data/B_3": {"law_full_text": "b"},
+    })
+    fetch(client, cache, log=lambda m: None)
+    assert cache.read(cache.data_path("B_2")) == {"law_full_text": "b"}
+    assert client.calls.count("law_revisions/A") == 1 and client.calls.count("law_revisions/B") == 1

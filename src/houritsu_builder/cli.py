@@ -16,6 +16,7 @@ def parser() -> argparse.ArgumentParser:
     f.add_argument("--limit", type=int, help="stop after this many laws")
     f.add_argument("--delay", type=float, default=0.1, help="seconds between requests of one worker")
     f.add_argument("--jobs", type=int, default=2, help="laws fetched at the same time")
+    f.add_argument("--full", action="store_true", help="refetch every revision list, not only those that may have changed")
 
     b = sub.add_parser("build", help="build the houritsu repository from the cache")
     b.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
