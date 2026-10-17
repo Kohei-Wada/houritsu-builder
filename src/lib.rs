@@ -6,6 +6,7 @@ pub mod fetch;
 pub mod fidelity;
 pub mod frontmatter;
 pub mod history;
+pub mod py;
 pub mod render;
 pub mod xmltext;
 

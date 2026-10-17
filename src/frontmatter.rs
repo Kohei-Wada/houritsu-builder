@@ -3,27 +3,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::Value;
 
-/// A JSON string literal as Python's `json.dumps(s, ensure_ascii=False)` writes it,
-/// which the published files were first generated with.
-pub fn json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
+use crate::py::{json_str, truthy};
 
 static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap());
 
@@ -38,16 +18,6 @@ fn v(value: Option<&Value>) -> String {
         Some(Value::String(s)) => json_str(s),
         Some(Value::Bool(b)) => json_str(if *b { "True" } else { "False" }),
         Some(other) => json_str(&other.to_string()),
-    }
-}
-
-/// Python's `a or b` on a JSON value: null, missing and "" fall through.
-pub fn truthy<'a>(value: Option<&'a Value>) -> Option<&'a Value> {
-    match value {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) if s.is_empty() => None,
-        Some(Value::Bool(false)) => None,
-        other => other,
     }
 }
 
@@ -152,10 +122,5 @@ mod tests {
         let mut r = rev();
         r["law_title"] = json!("a\"b:c");
         assert!(frontmatter(&law_info(), &r).contains("title: \"a\\\"b:c\""));
-    }
-
-    #[test]
-    fn json_str_matches_python() {
-        assert_eq!(json_str("a\u{1}\u{7f}\u{2028}\\\t"), "\"a\\u0001\u{7f}\u{2028}\\\\\\t\"");
     }
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::cache::Cache;
-use crate::frontmatter::truthy;
+use crate::py::{or_str, truthy};
 
 pub fn kebab(law_type: &str) -> String {
     let mut out = String::new();
@@ -66,10 +66,6 @@ impl Revision {
     }
 }
 
-fn or<'a>(a: Option<&'a str>, b: &'a str) -> &'a str {
-    a.filter(|s| !s.is_empty()).unwrap_or(b)
-}
-
 pub struct Group {
     pub amendment_law_id: String,
     pub enforced: Option<String>,
@@ -82,7 +78,7 @@ impl Group {
     }
 
     pub fn commit_date(&self) -> String {
-        or(self.enforced.as_deref(), or(self.revisions[0].promulgated(), "1970-01-02")).to_string()
+        or_str(self.enforced.as_deref(), or_str(self.revisions[0].promulgated(), "1970-01-02")).to_string()
     }
 
     pub fn author(&self) -> String {
@@ -97,13 +93,13 @@ impl Group {
     pub fn message(&self) -> String {
         let first = &self.revisions[0];
         let rev = &first.rev;
-        let title = or(as_str(rev.get("amendment_law_title")), first.title());
+        let title = or_str(as_str(rev.get("amendment_law_title")), first.title());
         let mut lines = vec![
             format!("{title} 施行"),
             String::new(),
-            format!("改正法令: {}", or(as_str(rev.get("amendment_law_num")), "不明")),
-            format!("公布日: {}", or(as_str(rev.get("amendment_promulgate_date")), "不明")),
-            format!("施行日: {}", or(self.enforced.as_deref(), "未定")),
+            format!("改正法令: {}", or_str(as_str(rev.get("amendment_law_num")), "不明")),
+            format!("公布日: {}", or_str(as_str(rev.get("amendment_promulgate_date")), "不明")),
+            format!("施行日: {}", or_str(self.enforced.as_deref(), "未定")),
             String::new(),
             "変更された法令:".to_string(),
         ];
@@ -112,7 +108,7 @@ impl Group {
         }
         lines.push(String::new());
         lines.push(format!("Amendment-Law-Id: {}", self.amendment_law_id));
-        lines.push(format!("Enforced: {}", or(self.enforced.as_deref(), "unknown")));
+        lines.push(format!("Enforced: {}", or_str(self.enforced.as_deref(), "unknown")));
         lines.join("\n") + "\n"
     }
 }
@@ -135,7 +131,7 @@ pub fn load_revisions(cache: &Cache, law_type: Option<&str>) -> anyhow::Result<L
             }
         }
         let law_id = info["law_id"].as_str().unwrap_or_default().to_string();
-        let law_num = or(as_str(info.get("law_num")), "").to_string();
+        let law_num = or_str(as_str(info.get("law_num")), "").to_string();
         let revs: Vec<Revision> = match doc["revisions"].take() {
             Value::Array(a) => a,
             _ => vec![],
@@ -169,7 +165,7 @@ pub fn load_revisions(cache: &Cache, law_type: Option<&str>) -> anyhow::Result<L
 
 fn drop_redundant_repeals(mut revisions: Vec<Revision>) -> Vec<Revision> {
     revisions.sort_by(|a, b| {
-        let key = |r: &Revision| (or(r.enforced(), or(r.promulgated(), "")).to_string(), r.amendment_law_id().to_string());
+        let key = |r: &Revision| (or_str(r.enforced(), or_str(r.promulgated(), "")).to_string(), r.amendment_law_id().to_string());
         key(a).cmp(&key(b))
     });
     let mut alive = HashSet::new();

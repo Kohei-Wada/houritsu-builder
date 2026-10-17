@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::api::{Api, ApiError};
 use crate::cache::Cache;
+use crate::py::is_truthy;
 
 const FUTURE: &str = "2099-12-31"; // asof this date, a law's revision_info is its newest revision, enforced or not
 
@@ -28,21 +29,26 @@ pub fn fetch_law_list(client: &dyn Api, params: &[(&str, &str)]) -> Result<Vec<V
         return Ok(laws);
     }
     let offsets: Vec<usize> = (stride..total).step_by(stride).collect();
-    let pages: Vec<Mutex<Option<Result<Value, ApiError>>>> = offsets.iter().map(|_| Mutex::new(None)).collect();
+    for page in at_once(&offsets, PAGES_AT_ONCE, |_, &offset| law_page(client, offset, params)) {
+        laws.extend(page?["laws"].as_array().cloned().unwrap_or_default());
+    }
+    Ok(laws)
+}
+
+/// Runs `f` on every item with up to `jobs` threads; the results keep the items' order.
+fn at_once<T: Sync, R: Send>(items: &[T], jobs: usize, f: impl Fn(usize, &T) -> R + Sync) -> Vec<R> {
+    let results: Vec<Mutex<Option<R>>> = items.iter().map(|_| Mutex::new(None)).collect();
     let next = AtomicUsize::new(0);
     std::thread::scope(|s| {
-        for _ in 0..PAGES_AT_ONCE.min(offsets.len()) {
+        for _ in 0..jobs.max(1).min(items.len()) {
             s.spawn(|| loop {
                 let k = next.fetch_add(1, Ordering::Relaxed);
-                let Some(&offset) = offsets.get(k) else { return };
-                *pages[k].lock().unwrap() = Some(law_page(client, offset, params));
+                let Some(item) = items.get(k) else { return };
+                *results[k].lock().unwrap() = Some(f(k, item));
             });
         }
     });
-    for page in pages {
-        laws.extend(page.into_inner().unwrap().unwrap()?["laws"].as_array().cloned().unwrap_or_default());
-    }
-    Ok(laws)
+    results.into_iter().map(|r| r.into_inner().unwrap().expect("every item ran")).collect()
 }
 
 fn law_id(law: &Value) -> String {
@@ -79,21 +85,12 @@ fn stale(cache: &Cache, law_id: &str, newest: [Option<&Value>; 2], today: &str, 
         return Ok(true); // a full text failed last time
     }
     let seen: HashSet<(String, String)> = revisions.iter().map(|r| (rid(r), r["updated"].to_string())).collect();
-    if newest.iter().flatten().any(|info| present(info) && !seen.contains(&(rid(info), info["updated"].to_string()))) {
+    if newest.iter().flatten().any(|info| is_truthy(info) && !seen.contains(&(rid(info), info["updated"].to_string()))) {
         return Ok(true);
     }
     Ok(revisions.iter().any(|r| {
         r["current_revision_status"] == "UnEnforced" && r["amendment_enforcement_date"].as_str().filter(|d| !d.is_empty()).unwrap_or("9999") <= today
     }))
-}
-
-/// Python truthiness of a JSON value, which the list entries were first checked with.
-fn present(v: &Value) -> bool {
-    match v {
-        Value::Null => false,
-        Value::Object(m) => !m.is_empty(),
-        _ => true,
-    }
 }
 
 fn amendments(revisions: &[Value]) -> HashSet<String> {
@@ -108,126 +105,142 @@ pub struct Options<'a> {
     pub full: bool,
 }
 
-/// Fetches revision lists and new revisions. Unless full, only for laws whose list may have changed.
-pub fn fetch(client: &dyn Api, cache: &Cache, o: &Options, log: &(dyn Fn(&str) + Sync)) -> anyhow::Result<BTreeMap<&'static str, u64>> {
-    let mut types: HashMap<String, String> = HashMap::new();
-    let mut targets: Vec<String> = if !o.law_ids.is_empty() {
-        o.law_ids.clone()
-    } else {
-        let (laws, future) = std::thread::scope(|s| {
-            let future = (!o.full).then(|| s.spawn(|| fetch_law_list(client, &[("asof", FUTURE)])));
-            (fetch_law_list(client, &[]), future.map(|f| f.join().unwrap()))
-        });
-        let laws = laws?;
-        cache.write(&cache.laws_path(), &Value::Array(laws.clone()))?;
-        for l in &laws {
-            types.insert(law_id(l), l["law_info"]["law_type"].as_str().unwrap_or_default().to_string());
-        }
-        let mut targets: Vec<String> =
-            laws.iter().map(law_id).filter(|id| o.law_type.is_none_or(|t| t.is_empty() || types[id] == t)).collect();
-        if let Some(future) = future {
-            let future: HashMap<String, Value> = future?.into_iter().map(|l| (law_id(&l), l["revision_info"].clone())).collect();
-            let current: HashMap<String, Value> = laws.iter().map(|l| (law_id(l), l["revision_info"].clone())).collect();
-            let (today, not_found) = (today_jst(), cache.not_found()?);
-            let mut kept = vec![];
-            for id in targets {
-                if stale(cache, &id, [current.get(&id), future.get(&id)], &today, &not_found)? {
-                    kept.push(id);
-                }
+pub type Stats = BTreeMap<&'static str, u64>;
+
+/// The laws whose revision list to (re)fetch, never-fetched first, and every listed law's type.
+fn select(client: &dyn Api, cache: &Cache, o: &Options) -> anyhow::Result<(Vec<String>, HashMap<String, String>)> {
+    if !o.law_ids.is_empty() {
+        return Ok((o.law_ids.clone(), HashMap::new()));
+    }
+    let (laws, future) = std::thread::scope(|s| {
+        let future = (!o.full).then(|| s.spawn(|| fetch_law_list(client, &[("asof", FUTURE)])));
+        (fetch_law_list(client, &[]), future.map(|f| f.join().unwrap()))
+    });
+    let laws = laws?;
+    cache.write(&cache.laws_path(), &Value::Array(laws.clone()))?;
+    let types: HashMap<String, String> =
+        laws.iter().map(|l| (law_id(l), l["law_info"]["law_type"].as_str().unwrap_or_default().to_string())).collect();
+    let mut targets: Vec<String> = laws.iter().map(law_id).filter(|id| of_type(o, types.get(id))).collect();
+    if let Some(future) = future {
+        let future: HashMap<String, Value> = future?.into_iter().map(|l| (law_id(&l), l["revision_info"].clone())).collect();
+        let current: HashMap<String, Value> = laws.iter().map(|l| (law_id(l), l["revision_info"].clone())).collect();
+        let (today, not_found) = (today_jst(), cache.not_found()?);
+        let mut kept = vec![];
+        for id in targets {
+            if stale(cache, &id, [current.get(&id), future.get(&id)], &today, &not_found)? {
+                kept.push(id);
             }
-            targets = kept;
         }
-        targets
-    };
+        targets = kept;
+    }
     targets.sort_by_key(|id| cache.revisions_path(id).exists()); // never-fetched laws first
     if let Some(limit) = o.limit.filter(|l| *l > 0) {
         targets.truncate(limit);
     }
+    Ok((targets, types))
+}
 
-    let stats = Mutex::new(BTreeMap::from([("laws", 0u64), ("revisions", 0), ("fetched", 0), ("failed", 0)]));
-    let new_amendments: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
-    let count = |key: &'static str, n: u64| *stats.lock().unwrap().get_mut(key).unwrap() += n;
-    let fail = |kind: &str, key: &str, e: &ApiError| -> anyhow::Result<()> {
-        let mut s = stats.lock().unwrap();
-        cache.record_failure(kind, key, &e.0)?;
-        *s.get_mut("failed").unwrap() += 1;
+fn of_type(o: &Options, law_type: Option<&String>) -> bool {
+    o.law_type.is_none_or(|t| t.is_empty() || law_type.is_some_and(|x| x == t))
+}
+
+struct Run<'a> {
+    client: &'a dyn Api,
+    cache: &'a Cache,
+    log: &'a (dyn Fn(&str) + Sync),
+    stats: Mutex<Stats>,
+    new_amendments: Mutex<HashSet<String>>,
+}
+
+impl Run<'_> {
+    fn count(&self, key: &'static str, n: u64) {
+        *self.stats.lock().unwrap().get_mut(key).unwrap() += n;
+    }
+
+    fn fail(&self, kind: &str, key: &str, e: &ApiError) -> anyhow::Result<()> {
+        let mut stats = self.stats.lock().unwrap();
+        self.cache.record_failure(kind, key, &e.0)?;
+        *stats.get_mut("failed").unwrap() += 1;
         Ok(())
-    };
-    let one = |i: usize, id: &str| -> anyhow::Result<()> {
-        let revisions = match client.get_json(&format!("law_revisions/{id}"), &[]) {
+    }
+
+    /// Refetches one law's revision list and fetches the full texts not cached yet.
+    fn law(&self, i: usize, id: &str) -> anyhow::Result<()> {
+        let revisions = match self.client.get_json(&format!("law_revisions/{id}"), &[]) {
             Ok(r) => r,
-            Err(e) => return fail("law_revisions", id, &e),
+            Err(e) => return self.fail("law_revisions", id, &e),
         };
-        let path = cache.revisions_path(id);
+        let path = self.cache.revisions_path(id);
         if path.exists() {
-            let old = amendments(revisions_of(&cache.read(&path)?));
-            let added: Vec<String> = amendments(revisions_of(&revisions)).into_iter().filter(|a| !old.contains(a)).collect();
-            new_amendments.lock().unwrap().extend(added);
+            let old = amendments(revisions_of(&self.cache.read(&path)?));
+            let added = amendments(revisions_of(&revisions)).into_iter().filter(|a| !old.contains(a));
+            self.new_amendments.lock().unwrap().extend(added);
         }
-        cache.write(&path, &revisions)?;
+        self.cache.write(&path, &revisions)?;
         let list = revisions_of(&revisions);
-        count("revisions", list.len() as u64);
+        self.count("revisions", list.len() as u64);
         for rev in list {
             let rid = rev["law_revision_id"].as_str().unwrap_or_default();
-            let path = cache.data_path(rid);
+            let path = self.cache.data_path(rid);
             if path.exists() {
                 continue;
             }
-            match client.get_json(&format!("law_data/{rid}"), &[("law_full_text_format", "xml"), ("response_format", "json")]) {
+            match self.client.get_json(&format!("law_data/{rid}"), &[("law_full_text_format", "xml"), ("response_format", "json")]) {
                 Ok(data) => {
-                    cache.write(&path, &data)?;
-                    count("fetched", 1);
+                    self.cache.write(&path, &data)?;
+                    self.count("fetched", 1);
                 }
-                Err(e) => fail("law_data", rid, &e)?,
+                Err(e) => self.fail("law_data", rid, &e)?,
             }
         }
-        count("laws", 1);
-        log(&format!("[{i}] {id} revisions={}", list.len()));
+        self.count("laws", 1);
+        (self.log)(&format!("[{i}] {id} revisions={}", list.len()));
         Ok(())
-    };
+    }
+}
 
+/// The laws, not yet done, that these amending laws also amend. A new amending law can add a
+/// revision in the middle of a law's history, which the newest-revision check misses; e-Gov lists
+/// every law it amends.
+fn amended_by(client: &dyn Api, amendments: &[String], o: &Options, types: &HashMap<String, String>, done: &HashSet<String>) -> anyhow::Result<Vec<String>> {
+    let mut found = vec![];
+    for amendment in amendments {
+        let params = [("amendment_law_id", amendment.as_str()), ("asof", FUTURE), ("omit_current_revision_info", "true")];
+        for l in fetch_law_list(client, &params)? {
+            let id = law_id(&l);
+            if !done.contains(&id) && !found.contains(&id) && of_type(o, types.get(&id)) {
+                found.push(id);
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Fetches revision lists and new revisions. Unless full, only for laws whose list may have changed.
+pub fn fetch(client: &dyn Api, cache: &Cache, o: &Options, log: &(dyn Fn(&str) + Sync)) -> anyhow::Result<Stats> {
+    let (mut targets, types) = select(client, cache, o)?;
+    let run = Run {
+        client,
+        cache,
+        log,
+        stats: Mutex::new(BTreeMap::from([("laws", 0), ("revisions", 0), ("fetched", 0), ("failed", 0)])),
+        new_amendments: Mutex::new(HashSet::new()),
+    };
     let (mut done, mut queried, mut step) = (HashSet::new(), HashSet::new(), 0);
     while !targets.is_empty() {
-        let next = AtomicUsize::new(0);
-        std::thread::scope(|s| -> anyhow::Result<()> {
-            let workers: Vec<_> = (0..o.jobs.max(1))
-                .map(|_| {
-                    s.spawn(|| -> anyhow::Result<()> {
-                        loop {
-                            let k = next.fetch_add(1, Ordering::Relaxed);
-                            let Some(id) = targets.get(k) else { return Ok(()) };
-                            one(step + k + 1, id)?;
-                        }
-                    })
-                })
-                .collect();
-            for w in workers {
-                w.join().unwrap()?;
-            }
-            Ok(())
-        })?;
+        for result in at_once(&targets, o.jobs, |k, id| run.law(step + k + 1, id)) {
+            result?;
+        }
         step += targets.len();
         done.extend(targets.drain(..));
         if o.full || !o.law_ids.is_empty() {
             break;
         }
-        // A new amending law can add a revision in the middle of a law's history, which the newest-revision
-        // check misses; e-Gov lists every law it amends.
-        let mut found: Vec<String> = new_amendments.lock().unwrap().drain().filter(|a| !queried.contains(a)).collect();
+        let mut found: Vec<String> = run.new_amendments.lock().unwrap().drain().filter(|a| queried.insert(a.clone())).collect();
         found.sort();
-        for amendment in found {
-            queried.insert(amendment.clone());
-            let params = [("amendment_law_id", amendment.as_str()), ("asof", FUTURE), ("omit_current_revision_info", "true")];
-            for l in fetch_law_list(client, &params)? {
-                let id = law_id(&l);
-                let typed = o.law_type.is_none_or(|t| t.is_empty() || types.get(&id).is_some_and(|x| x == t));
-                if !done.contains(&id) && !targets.contains(&id) && typed {
-                    targets.push(id);
-                }
-            }
-        }
+        targets = amended_by(client, &found, o, &types, &done)?;
     }
-    Ok(stats.into_inner().unwrap())
+    Ok(run.stats.into_inner().unwrap())
 }
 
 #[cfg(test)]
