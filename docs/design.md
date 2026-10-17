@@ -96,8 +96,9 @@ Checked on 2026-10-17: both law lists take 41 s, and 0 of 8,611 cached laws were
 
 Reads only the cache and rebuilds the whole history from scratch every time. Rendering
 is reused: `rendered.json` in the cache maps each revision to the blob of the last linted
-build, keyed by the revision's data file and metadata and by a hash of the builder
-executable and the rumdl version. A revision whose key is unchanged takes its blob from the
+build, keyed by the revision's data file and metadata and by a hash of the sources rendering
+depends on (render, fidelity, frontmatter, build, the rumdl config, `Cargo.lock`) and
+the rumdl version, so a fetch-only change keeps them. A revision whose key is unchanged takes its blob from the
 previous repository (borrowed through git alternates, then copied in by `git repack -a`)
 and is neither rendered nor linted again. Workers write new blobs as loose objects, so
 `git fast-import` only builds trees and commits.

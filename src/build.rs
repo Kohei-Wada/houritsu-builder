@@ -105,12 +105,26 @@ fn prepare(staging: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Everything a blob or its lint result depends on. Fetch or CLI changes keep the previous renders.
+const RENDER_SOURCES: [&str; 7] = [
+    include_str!("render.rs"),
+    include_str!("fidelity.rs"),
+    include_str!("frontmatter.rs"),
+    include_str!("xmltext.rs"),
+    include_str!("build.rs"),
+    include_str!("../assets/rumdl.toml"),
+    include_str!("../Cargo.lock"),
+];
+
 fn code_version() -> &'static str {
     static VERSION: OnceLock<String> = OnceLock::new();
     VERSION.get_or_init(|| {
         let mut h = Sha1::new();
         h.update(RUMDL.join(" "));
-        h.update(fs::read(std::env::current_exe().unwrap()).unwrap());
+        for source in RENDER_SOURCES {
+            h.update(source);
+            h.update([0]);
+        }
         hex(&h.finalize())
     })
 }
