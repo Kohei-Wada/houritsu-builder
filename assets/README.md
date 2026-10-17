@@ -26,12 +26,20 @@ frontmatter by title:
 git grep -l '^title: "個人情報の保護に関する法律"' -- laws
 ```
 
-## Source
+## 出典 / Source
 
-Generated from the [e-Gov law API](https://laws.e-gov.go.jp/) by
-[houritsu-builder](https://github.com/Kohei-Wada/houritsu-builder). The statute text is
-reproduced unchanged, but this is not the official text; the official text is the 官報.
-Revision history is limited to what e-Gov provides.
+出典：e-Gov法令検索（https://laws.e-gov.go.jp/）、PDL1.0（https://www.digital.go.jp/resources/open_data/public_data_license_v1.0）
+
+e-Gov法令検索の法令データ（法令API v2）を [houritsu-builder](https://github.com/Kohei-Wada/houritsu-builder)（Kohei-Wada）が markdown に加工して作成。
+条文は変更していないが、正本は官報。改正履歴は e-Gov が提供する範囲に限る。
+
+The statute text is reproduced unchanged, but this is not the official text; the official
+text is the 官報. Revision history is limited to what e-Gov provides.
+
+## License
+
+Same terms as the source data: PDL1.0, compatible with CC BY 4.0. Attribute as in the
+section above. The statute text itself is not copyrighted (著作権法第13条).
 
 ## Lint
 

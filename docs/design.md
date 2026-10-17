@@ -250,6 +250,12 @@ Each check runs in tests and on every build; any failure fails the build.
 4. Daily timer.
 5. Before going public: check the e-Gov terms of use (attribution, disclaimer that
    the official text is the 官報).
+   Checked 2026-10-17: e-Gov 法令検索 content is under PDL1.0 (CC BY 4.0 compatible;
+   https://laws.e-gov.go.jp/terms/). It requires a source line, a statement that the data
+   was edited and by whom, and not presenting the result as made by the government. The
+   README carries the source line in e-Gov's format, the edit statement, and the 官報
+   disclaimer; houritsu is offered under the same terms. Statute text itself is not
+   copyrighted (著作権法第13条).
 
 ## Open questions
 
