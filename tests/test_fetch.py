@@ -51,3 +51,15 @@ def test_fetch_by_law_id_skips_listing(tmp_path):
     client = FakeClient({"law_revisions/A": revs("A"), "laws": AssertionError("must not list")})
     fetch(client, Cache(tmp_path), law_ids=["A"], log=lambda *a: None)
     assert client.calls == ["law_revisions/A"]
+
+
+def test_fetch_takes_never_fetched_laws_first(tmp_path):
+    cache = Cache(tmp_path)
+    cache.write(cache.revisions_path("A"), revs("A"))
+    client = FakeClient({
+        "laws": {"total_count": 2, "laws": [law("A"), law("B")]},
+        "law_revisions/A": revs("A"),
+        "law_revisions/B": revs("B"),
+    })
+    fetch(client, cache, log=lambda m: None)
+    assert client.calls == ["laws", "law_revisions/B", "law_revisions/A"]

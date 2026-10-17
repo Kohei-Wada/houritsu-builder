@@ -7,6 +7,7 @@ import urllib.request
 from typing import Any, Callable
 
 BASE = "https://laws.e-gov.go.jp/api/2"
+BACKOFF = 2.0
 
 
 class ApiError(Exception):
@@ -22,7 +23,7 @@ class Client:
     def __init__(
         self,
         base: str = BASE,
-        delay: float = 1.0,
+        delay: float = 0.1,
         retries: int = 5,
         opener: Callable[[str], bytes] | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -52,5 +53,5 @@ class Client:
                 self.sleep(self.delay)
                 return value
             if attempt < self.retries - 1:
-                self.sleep(self.delay * 2 ** (attempt + 1))
+                self.sleep(BACKOFF * 2 ** attempt)
         raise ApiError(f"gave up after {self.retries} attempts: {url}") from last

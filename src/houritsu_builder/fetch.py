@@ -19,6 +19,7 @@ def fetch(client, cache: Cache, law_type=None, law_ids=None, limit=None, log=pri
         laws = fetch_law_list(client)
         cache.write(cache.laws_path(), laws)
         targets = [l["law_info"]["law_id"] for l in laws if law_type is None or l["law_info"]["law_type"] == law_type]
+    targets.sort(key=lambda law_id: cache.revisions_path(law_id).exists())  # never-fetched laws first
     if limit:
         targets = targets[:limit]
     stats = {"laws": 0, "revisions": 0, "fetched": 0, "failed": 0}

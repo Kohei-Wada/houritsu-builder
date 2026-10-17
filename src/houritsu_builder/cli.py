@@ -14,7 +14,7 @@ def parser() -> argparse.ArgumentParser:
     f.add_argument("--law-type", help="only this e-Gov law_type, e.g. Act")
     f.add_argument("--law-id", action="append", dest="law_ids", help="only these law IDs (repeatable)")
     f.add_argument("--limit", type=int, help="stop after this many laws")
-    f.add_argument("--delay", type=float, default=1.0, help="seconds between requests")
+    f.add_argument("--delay", type=float, default=0.1, help="seconds between requests")
 
     b = sub.add_parser("build", help="build the houritsu repository from the cache")
     b.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
