@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use houritsu_builder::api::Client;
+use houritsu_builder::bills;
 use houritsu_builder::build::{self, build};
 use houritsu_builder::cache::Cache;
 use houritsu_builder::fetch::{self, fetch};
@@ -83,10 +84,12 @@ fn main() -> anyhow::Result<()> {
                 jobs,
                 full,
             };
-            let stats = fetch(&Client::new(delay), &Cache::new(cache), &options, &|line| {
-                println!("{line}")
-            })?;
+            let cache = Cache::new(cache);
+            let stats = fetch(&Client::new(delay), &cache, &options, &|line| println!("{line}"))?;
             println!("{}", serde_json::to_string(&stats)?);
+            if let Err(e) = bills::fetch(&cache) {
+                eprintln!("bill list not refreshed, keeping the previous one: {e:#}");
+            }
         }
         Cmd::Build {
             cache,

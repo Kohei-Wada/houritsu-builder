@@ -200,6 +200,12 @@ Enforced: 2027-01-17
 ```
 
 - The last two lines are git trailers (`git log --format='%(trailers)'`) for tools.
+- An amending Act also gets `Bill: 閣法 第221回国会 第54号` and `Bill-Url:` (the bill's text
+  page on the House of Representatives site), matched by law number through the bill
+  database by smartnews-smri (MIT), cached by `fetch`. Only the link: the bill's 理由
+  is the House's copyright (use only as the copyright act allows, no modification), so
+  tools fetch it on demand. Checked 2026-10-17: 1,416 of 1,639 amending Acts match; the
+  database starts around 1998, so older ones do not.
 - Author and committer dates: enforcement date, 00:00 +09:00. git rejects dates before 1970
   (`git commit` refuses them; a negative time from fast-import fails `git fsck` with
   `badDate`, checked with git 2.56 on 2026-10-17), so earlier dates become 1970-01-02;

@@ -9,6 +9,7 @@ use base64::Engine;
 use rayon::prelude::*;
 use serde_json::{json, Value};
 
+use crate::bills::Bills;
 use crate::cache::Cache;
 use crate::fastimport::{write_blob, Commit, Stream};
 use crate::fidelity::check_doc;
@@ -154,15 +155,23 @@ struct Streamed {
     unknown: Counts,
 }
 
+/// The commits to write: groups of revisions and the bills behind amending Acts.
+#[derive(Clone, Copy)]
+struct History<'a> {
+    main: &'a [Group],
+    upcoming: &'a [Group],
+    bills: &'a Bills,
+}
+
 fn stream(
     cache: &Cache,
     staging: &Path,
-    main: &[Group],
-    upcoming: &[Group],
+    history: &History,
     lint_dir: Option<&Path>,
     jobs: usize,
     previous: &HashMap<String, Entry>,
 ) -> anyhow::Result<Streamed> {
+    let History { main, upcoming, bills } = *history;
     let all: Vec<&Revision> = main
         .iter()
         .chain(upcoming)
@@ -244,7 +253,7 @@ fn stream(
                     );
                     out.files += 1;
                 }
-                let (date, message, author) = (g.commit_date(), g.message(), g.author());
+                let (date, message, author) = (g.commit_date(), g.message(bills), g.author());
                 s.commit(Commit {
                     ref_,
                     date: &date,
@@ -311,11 +320,12 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
             let _ = fs::remove_dir_all(&lint_dir);
             fs::create_dir_all(&lint_dir)?;
         }
+        let bills = Bills::load(cache)?;
+        let history = History { main: &main, upcoming: &upcoming, bills: &bills };
         let streamed = stream(
             cache,
             &staging,
-            &main,
-            &upcoming,
+            &history,
             o.lint.then_some(lint_dir.as_path()),
             o.jobs,
             &previous,

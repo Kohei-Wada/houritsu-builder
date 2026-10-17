@@ -1,4 +1,5 @@
 pub mod api;
+pub mod bills;
 pub mod build;
 pub mod cache;
 pub mod fastimport;

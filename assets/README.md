@@ -11,7 +11,9 @@ Information Protection Act, and `git show <commit>` is what one amendment change
 - `laws/<law type>/<first 3 characters of the ID>/<e-Gov law ID>.md`, with metadata in YAML
   frontmatter. The first 3 characters are the era and year of promulgation (`415` = 平成15年).
 - `main`: enforced revisions. `upcoming`: promulgated but not yet in force.
-- Commit date = enforcement date (00:00 JST). Trailers: `Amendment-Law-Id`, `Enforced`.
+- Commit date = enforcement date (00:00 JST). Trailers: `Amendment-Law-Id`, `Enforced`;
+  for an amending Act, also `Bill` (the Diet bill) and `Bill-Url` (its text on the House of
+  Representatives site, where the bill's 理由 is).
   git cannot record dates before 1970, so earlier ones are recorded as 1970-01-02; the real
   date is in the `Enforced` trailer and the frontmatter.
 - A repealed law's file is deleted in the repealing law's commit; its history stays in
@@ -32,6 +34,8 @@ git grep -l '^title: "個人情報の保護に関する法律"' -- laws
 
 e-Gov法令検索の法令データ（法令API v2）を [houritsu-builder](https://github.com/Kohei-Wada/houritsu-builder)（Kohei-Wada）が markdown に加工して作成。
 条文は変更していないが、正本は官報。改正履歴は e-Gov が提供する範囲に限る。
+
+議案との対応：[衆議院議案データベース](https://github.com/smartnews-smri/house-of-representatives)（smartnews-smri、MIT）。議案番号と本文ページへのリンクのみ使用。
 
 The statute text is reproduced unchanged, but this is not the official text; the official
 text is the 官報. Revision history is limited to what e-Gov provides.

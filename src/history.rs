@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::bills::Bills;
 use crate::cache::Cache;
 use crate::py::{or_str, truthy};
 
@@ -100,7 +101,7 @@ impl Group {
         }
     }
 
-    pub fn message(&self) -> String {
+    pub fn message(&self, bills: &Bills) -> String {
         let first = &self.revisions[0];
         let rev = &first.rev;
         let title = or_str(as_str(rev.get("amendment_law_title")), first.title());
@@ -133,6 +134,12 @@ impl Group {
             "Enforced: {}",
             or_str(self.enforced.as_deref(), "unknown")
         ));
+        if let Some(bill) = bills.for_law(&self.amendment_law_id) {
+            lines.push(format!("Bill: {} 第{}回国会 第{}号", bill.kind, bill.session, bill.number));
+            if !bill.url.is_empty() {
+                lines.push(format!("Bill-Url: {}", bill.url));
+            }
+        }
         lines.join("\n") + "\n"
     }
 }
@@ -370,7 +377,7 @@ mod tests {
         );
         assert_eq!(upcoming[0].commit_date(), "2026-06-01");
         assert!(upcoming[0]
-            .message()
+            .message(&Bills::default())
             .ends_with("Amendment-Law-Id: Z\nEnforced: unknown\n"));
     }
 
@@ -407,10 +414,19 @@ mod tests {
             ),
         ]);
         assert_eq!(
-            main[0].message(),
+            main[0].message(&Bills::default()),
             "改正法 施行\n\n改正法令: Z号\n公布日: 2026-07-17\n施行日: 2027-01-17\n\n変更された法令:\n- 甲法（A号）\n- 乙法（B号）\n\n\
              Amendment-Law-Id: Z\nEnforced: 2027-01-17\n"
         );
+    }
+
+    #[test]
+    fn an_amending_act_names_its_bill() {
+        let (main, _) = plan(vec![r("A", "508AC0000000056", "2027-01-17")]);
+        assert!(main[0].message(&crate::bills::tests::sample()).ends_with(
+            "Amendment-Law-Id: 508AC0000000056\nEnforced: 2027-01-17\n\
+             Bill: 閣法 第221回国会 第54号\nBill-Url: https://example/g22109054.htm\n"
+        ));
     }
 
     #[test]
@@ -448,7 +464,7 @@ mod tests {
             ]
         );
         assert!(main[1]
-            .message()
+            .message(&Bills::default())
             .contains("- 法（A号）（廃止）\n- 乙法（B号）\n"));
     }
 
