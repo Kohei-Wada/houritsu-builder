@@ -9,7 +9,6 @@ import subprocess
 import sysconfig
 from concurrent.futures import ProcessPoolExecutor
 from importlib import resources
-from itertools import islice
 from pathlib import Path
 
 from houritsu_builder.cache import Cache
@@ -83,17 +82,17 @@ def _render(root: Path, objects: Path, r: Revision, lint_file: Path | None) -> t
     return write_blob(objects, text.encode()), rendered.unknown
 
 
+def _render_task(task: tuple) -> tuple[str, collections.Counter]:
+    return _render(*task)
+
+
 def _rendered_in_order(tasks, jobs: int):
     if jobs <= 1:
         yield from (_render(*t) for t in tasks)
         return
-    tasks = iter(tasks)
+    # Results are only a sha and counts, so queue everything: a bounded window let one huge law stall the pool.
     with ProcessPoolExecutor(jobs) as pool:
-        window = collections.deque(pool.submit(_render, *t) for t in islice(tasks, jobs * 4))
-        while window:
-            result = window.popleft().result()
-            window.extend(pool.submit(_render, *t) for t in islice(tasks, 1))
-            yield result
+        yield from pool.map(_render_task, tasks, chunksize=4)
 
 
 def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir: Path | None, unknown, jobs: int,
@@ -185,8 +184,8 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
             lint_dir.mkdir(parents=True)
         files, entries = _stream(cache, staging, main_groups, upcoming_groups, lint_dir if lint else None, unknown, jobs, previous)
         subprocess.run(["git", "reset", "-q", "--hard", "main"], cwd=staging, check=True)
-        subprocess.run(["git", "repack", "-adq"], cwd=staging, check=True)  # loose and borrowed blobs → one delta-compressed pack
-        alternates.unlink(missing_ok=True)
+        # Loose and borrowed blobs → one delta-compressed pack, while lint runs on the same files.
+        repack = subprocess.Popen(["git", "repack", "-adq"], cwd=staging)
 
         report = {
             "commits_main": len(main_groups),
@@ -198,12 +197,17 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
             "unknown": dict(unknown.most_common()),
             "lint": "skipped",
         }
-        if lint:
-            returncode, output = _lint(lint_dir)
-            if returncode != 0:
-                (cache.root / "lint.log").write_text(output)
-                raise SystemExit("rumdl failed (full log: lint.log in cache):\n" + output[:4000])
-            report["lint"] = "ok"
+        try:
+            if lint:
+                returncode, output = _lint(lint_dir)
+                if returncode != 0:
+                    (cache.root / "lint.log").write_text(output)
+                    raise SystemExit("rumdl failed (full log: lint.log in cache):\n" + output[:4000])
+                report["lint"] = "ok"
+        finally:
+            if repack.wait() != 0:
+                raise SystemExit("git repack failed")
+        alternates.unlink(missing_ok=True)
         _copy_remote_config(out, staging)
         _clear(out)
         out.rmdir()
