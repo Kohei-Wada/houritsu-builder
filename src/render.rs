@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::xmltext::{elements, find, inline, tag, El};
+use crate::xmltext::{elements, find, inline, strip_pretty, tag, El};
 
 pub const CONTAINERS: [&str; 5] = ["Part", "Chapter", "Section", "Subsection", "Division"];
 pub const SKIPPED_TAGS: [&str; 1] = ["TOC"];
@@ -266,7 +266,18 @@ impl Renderer {
     }
 
     fn structure(&mut self, el: El, indent: &str) {
-        for child in elements(el) {
+        for child in el.children() {
+            if child.is_text() {
+                // stray text beside the parts, e.g. a lone "-" before a Fig in a Style
+                let text = strip_pretty(child.text().unwrap_or(""));
+                if !text.is_empty() {
+                    self.block(format!("{indent}{}", literal(&text)));
+                }
+                continue;
+            }
+            if !child.is_element() {
+                continue;
+            }
             match tag(child) {
                 "Fig" => self.fig(child, indent),
                 "TableStruct" => self.table(child, indent),
@@ -533,6 +544,14 @@ pub(crate) mod tests {
             render_law(&xml).unwrap().unknown,
             Counts::from([("Fig".to_string(), 1)])
         );
+    }
+
+    #[test]
+    fn stray_text_in_a_style_is_kept() {
+        let xml = law("<AppdxStyle><AppdxStyleTitle>様式</AppdxStyleTitle><StyleStruct><Style>\n  -<Fig src=\"./pict/a.pdf\"/>\n</Style></StyleStruct></AppdxStyle>");
+        let r = render_doc(&parse(&xml).unwrap(), Some("R")).unwrap();
+        assert!(r.markdown.contains("\n\n\\-\n\n[a.pdf]"), "{}", r.markdown);
+        check(&xml, &r.markdown, "t").unwrap();
     }
 
     #[test]
