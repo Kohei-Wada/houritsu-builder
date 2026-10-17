@@ -63,3 +63,16 @@ def test_fetch_takes_never_fetched_laws_first(tmp_path):
     })
     fetch(client, cache, log=lambda m: None)
     assert client.calls == ["laws", "law_revisions/B", "law_revisions/A"]
+
+
+def test_fetch_in_parallel_gets_everything(tmp_path):
+    ids = [f"L{n}" for n in range(20)]
+    routes = {"laws": {"total_count": 20, "laws": [law(i) for i in ids]}}
+    for i in ids:
+        routes[f"law_revisions/{i}"] = revs(i, f"{i}_1_X", f"{i}_2_Y")
+        routes[f"law_data/{i}_1_X"] = routes[f"law_data/{i}_2_Y"] = {"law_full_text": i}
+    routes["law_revisions/L3"] = ApiError("gave up")
+    cache = Cache(tmp_path)
+    stats = fetch(FakeClient(routes), cache, log=lambda m: None, jobs=4)
+    assert stats == {"laws": 19, "revisions": 38, "fetched": 38, "failed": 1}
+    assert cache.read(cache.data_path("L7_2_Y")) == {"law_full_text": "L7"}

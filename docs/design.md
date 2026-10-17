@@ -74,8 +74,9 @@ The builder is Python, managed with uv. It has two commands.
 3. For each revision not yet cached, fetch the full text and store the raw response.
 
 One file per response, so an interrupted run resumes where it stopped; laws never
-fetched go first. Requests are sent one at a time, 0.1 s apart (responses took about
-0.1 s on 2026-10-17; the 1 s spacing first used made the crawl ~90 % sleep). Failures
+fetched go first. Four workers fetch one law each; a worker waits 0.1 s between its
+requests (responses took 0.1–0.2 s on 2026-10-17; the single 1 s-spaced client first
+used made the crawl ~90 % sleep). Failures
 are retried with exponential backoff from 2 s; revisions that still fail are recorded
 and retried on the next run. A daily run only fetches
 revision lists and revisions it has not seen.
