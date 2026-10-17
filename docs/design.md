@@ -84,7 +84,13 @@ revision lists and revisions it has not seen.
 
 ### build
 
-Reads only the cache and rebuilds the whole repository from scratch every time.
+Reads only the cache and rebuilds the whole history from scratch every time. Rendering
+is reused: `rendered.json` in the cache maps each revision to the blob of the last linted
+build, keyed by the revision's data file and metadata and by a hash of the builder's code,
+assets and rumdl version. A revision whose key is unchanged takes its blob from the
+previous repository (borrowed through git alternates, then copied in by `git repack -a`)
+and is neither rendered nor linted again. Workers write new blobs as loose objects, so
+`git fast-import` only builds trees and commits.
 
 1. Group revisions by amending law and enforcement date. One group is one commit:
    "this amending law came into force on this date and changed these files".
