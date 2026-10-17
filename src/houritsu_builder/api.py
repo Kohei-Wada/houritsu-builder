@@ -54,4 +54,4 @@ class Client:
                 return value
             if attempt < self.retries - 1:
                 self.sleep(BACKOFF * 2 ** attempt)
-        raise ApiError(f"gave up after {self.retries} attempts: {url}") from last
+        raise ApiError(f"gave up after {self.retries} attempts: {url}: {last!r}") from last
