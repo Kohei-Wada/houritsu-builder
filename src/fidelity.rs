@@ -43,7 +43,11 @@ fn walk(el: El, out: &mut String, parent: &str, quoted: bool) {
     }
     push_text(el, out);
     // the 附則 heading of the body also names its amending law (render::suppl_source)
-    let source = if t == "SupplProvision" && parent.is_empty() { suppl_source(el) } else { String::new() };
+    let source = if t == "SupplProvision" && parent.is_empty() {
+        suppl_source(el)
+    } else {
+        String::new()
+    };
     let has_label = children.iter().any(|c| tag(*c) == "SupplProvisionLabel");
     if !has_label {
         out.push_str(&source);

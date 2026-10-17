@@ -461,7 +461,10 @@ mod tests {
         );
         assert!(git::run(&out, &["rev-parse", "--verify", "-q", "upcoming"]).is_err());
         assert!(out.join("laws/act/323/323AC1000000178.md").exists()); // working tree checked out
-        assert_eq!(sh(&out, &["show", "main:.gitattributes"]), "*.md diff=markdown\n");
+        assert_eq!(
+            sh(&out, &["show", "main:.gitattributes"]),
+            "*.md diff=markdown\n"
+        );
     }
 
     #[test]

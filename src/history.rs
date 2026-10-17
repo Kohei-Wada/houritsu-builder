@@ -485,7 +485,10 @@ mod tests {
             r("A", "Z2", "2026-04-01"),
             r("A", "Z3", "2027-04-01"),
         ]);
-        let got: Vec<_> = main.iter().map(|g| (g.amendment_law_id.as_str(), g.revisions[0].repealed())).collect();
+        let got: Vec<_> = main
+            .iter()
+            .map(|g| (g.amendment_law_id.as_str(), g.revisions[0].repealed()))
+            .collect();
         assert_eq!(got, [("Y", false), ("Z1", true)]);
     }
 
