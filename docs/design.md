@@ -186,6 +186,15 @@ Keys are stable across builds; tools may rely on them.
 - Paragraphs (項) become paragraphs; items (号) and sub-items become nested lists.
 - Supplementary provisions (附則) and appended tables (別表) are included from the
   first version. Complex tables are first rendered as text and improved later.
+- Tables are HTML `<table>`s, one `<tr>`/`<td>` per line, keeping `rowspan`/`colspan` (34% of
+  tables merge cells, which markdown tables cannot express) and joining a cell's sentences
+  with `<br>`. Markdown is not parsed inside, so cells are not escaped.
+- A figure (`Fig`) is a one-line link to its attachment on e-Gov,
+  `[name](https://laws.e-gov.go.jp/api/2/attachment/<revision_id>?src=<src>)` (served as a
+  download). About 3 in 10 `Fig`s have an empty `src` in e-Gov's data; those are counted as
+  unknown. 様式・書式・注記 containers (`StyleStruct` etc.) render part by part instead of as one
+  paragraph; almost all 様式 are figures.
+- The fidelity check strips the table tags and skips attachment-link lines.
 - A 附則 of an amending law is headed with that law's number as e-Gov shows it,
   `## 附　則（平成一九年三月三一日法律第二三号）`, from the XML's `AmendLawNum`; the law's own
   附則 has none. Without it all 160,580 附則 headings were the same string.

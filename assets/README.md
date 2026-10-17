@@ -10,6 +10,8 @@ Information Protection Act, and `git show <commit>` is what one amendment change
 
 - `laws/<law type>/<first 3 characters of the ID>/<e-Gov law ID>.md`, with metadata in YAML
   frontmatter. The first 3 characters are the era and year of promulgation (`415` = 平成15年).
+- Tables are HTML (merged cells kept). Figures and 様式 are links to the attachment on e-Gov;
+  about 3 in 10 figures have no attachment there and are missing.
 - `main`: enforced revisions. `upcoming`: promulgated but not yet in force.
 - Commit date = enforcement date (00:00 JST). Trailers: `Amendment-Law-Id`, `Enforced`;
   for an amending Act, also `Bill` (the Diet bill) and `Bill-Url` (its text on the House of
