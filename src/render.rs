@@ -6,7 +6,7 @@ use regex::Regex;
 use crate::xmltext::{elements, find, inline, strip_pretty, tag, El};
 
 pub const CONTAINERS: [&str; 5] = ["Part", "Chapter", "Section", "Subsection", "Division"];
-pub const SKIPPED_TAGS: [&str; 1] = ["TOC"];
+const SKIPPED_TAGS: [&str; 1] = ["TOC"];
 
 pub type Counts = BTreeMap<String, u64>;
 
@@ -73,6 +73,15 @@ pub const ATTACHMENT: &str = "https://laws.e-gov.go.jp/api/2/attachment/";
 /// Written where a figure has no attachment in e-Gov's data; not statute text.
 pub const NO_IMAGE: &str = "（図：e-Gov に画像なし）";
 
+/// A figure inside text or a table cell, as inline HTML: markdown is not parsed inside a table.
+pub fn inline_figure(revision: &str, src: &str) -> String {
+    if src.is_empty() {
+        return NO_IMAGE.to_string();
+    }
+    let name = src.rsplit('/').next().unwrap_or(src);
+    format!("<a href=\"{ATTACHMENT}{revision}?src={src}\">{name}</a>")
+}
+
 fn has_loose_text(el: El) -> bool {
     el.children()
         .any(|c| c.is_text() && !c.text().unwrap_or("").trim().is_empty())
@@ -83,6 +92,10 @@ fn same(a: Option<El>, b: El) -> bool {
 }
 
 impl Renderer {
+    fn inline(&self, el: El) -> String {
+        inline(el, self.revision.as_deref())
+    }
+
     fn block(&mut self, text: String) {
         if !text.is_empty() {
             self.blocks.push(text);
@@ -100,7 +113,7 @@ impl Renderer {
             return self.structure(el, indent);
         }
         *self.unknown.entry(tag(el).to_string()).or_default() += 1;
-        let text = inline(el);
+        let text = self.inline(el);
         if !text.is_empty() {
             self.block(format!("{indent}{}", literal(&text)));
         }
@@ -109,9 +122,9 @@ impl Renderer {
     fn body(&mut self, body: El) {
         for el in elements(body) {
             match tag(el) {
-                "LawTitle" => self.heading(1, inline(el)),
+                "LawTitle" => self.heading(1, self.inline(el)),
                 t if SKIPPED_TAGS.contains(&t) => {}
-                "EnactStatement" => self.block(literal(&inline(el))),
+                "EnactStatement" => self.block(literal(&self.inline(el))),
                 "Preamble" => {
                     for p in elements(el) {
                         if tag(p) == "Paragraph" {
@@ -142,7 +155,7 @@ impl Renderer {
 
     fn container(&mut self, el: El, level: usize) {
         let title = find(el, &format!("{}Title", tag(el)));
-        self.heading(level, title.map(inline).unwrap_or_default());
+        self.heading(level, title.map(|e| self.inline(e)).unwrap_or_default());
         self.provision(
             elements(el).filter(|c| !same(title, *c)).collect(),
             level + 1,
@@ -153,7 +166,7 @@ impl Renderer {
         let (title, caption) = (find(el, "ArticleTitle"), find(el, "ArticleCaption"));
         self.heading(
             level,
-            title.map(inline).unwrap_or_default() + &caption.map(inline).unwrap_or_default(),
+            title.map(|e| self.inline(e)).unwrap_or_default() + &caption.map(|e| self.inline(e)).unwrap_or_default(),
         );
         for child in elements(el) {
             if same(title, child) || same(caption, child) {
@@ -171,9 +184,9 @@ impl Renderer {
         match el {
             None => String::new(),
             Some(el) if find(el, "Column").is_some() => {
-                elements(el).map(inline).collect::<Vec<_>>().join(" ")
+                elements(el).map(|e| self.inline(e)).collect::<Vec<_>>().join(" ")
             }
-            Some(el) => inline(el),
+            Some(el) => self.inline(el),
         }
     }
 
@@ -184,9 +197,9 @@ impl Renderer {
             find(el, "ParagraphSentence"),
         );
         if let Some(c) = caption {
-            self.block(literal(&inline(c)));
+            self.block(literal(&self.inline(c)));
         }
-        let n = num.map(inline).unwrap_or_default();
+        let n = num.map(|e| self.inline(e)).unwrap_or_default();
         let text = [n, self.sentence(sentence)]
             .into_iter()
             .filter(|t| !t.is_empty())
@@ -214,7 +227,7 @@ impl Renderer {
             find(el, &format!("{t}Sentence")),
         );
         let text = [
-            title.map(inline).unwrap_or_default(),
+            title.map(|e| self.inline(e)).unwrap_or_default(),
             self.sentence(sentence),
         ]
         .into_iter()
@@ -286,7 +299,7 @@ impl Renderer {
                 "Table" => self.html_table(child, indent),
                 t if STRUCTS.contains(&t) => self.structure(child, indent),
                 _ => {
-                    let text = inline(child);
+                    let text = self.inline(child);
                     if !text.is_empty() {
                         self.block(format!("{indent}{}", literal(&text)));
                     }
@@ -319,7 +332,7 @@ impl Renderer {
             if tag(child) == "Table" {
                 self.html_table(child, indent);
             } else {
-                let text = inline(child);
+                let text = self.inline(child);
                 if !text.is_empty() {
                     self.block(format!("{indent}{}", literal(&text)));
                 }
@@ -346,11 +359,11 @@ impl Renderer {
                     }
                 }
                 let parts: Vec<String> = elements(col)
-                    .map(inline)
+                    .map(|c| self.inline(c))
                     .filter(|t| !t.is_empty())
                     .collect();
                 let content = if has_loose_text(col) || parts.is_empty() {
-                    inline(col)
+                    self.inline(col)
                 } else {
                     parts.join("<br>")
                 };
@@ -370,7 +383,7 @@ impl Renderer {
 
     fn suppl(&mut self, el: El) {
         let label = find(el, "SupplProvisionLabel");
-        self.heading(2, label.map(inline).unwrap_or_default() + &suppl_source(el));
+        self.heading(2, label.map(|e| self.inline(e)).unwrap_or_default() + &suppl_source(el));
         for child in elements(el) {
             if same(label, child) {
                 continue;
@@ -394,7 +407,7 @@ impl Renderer {
                 [title_tag.as_str(), "RelatedArticleNum", "ArithFormulaNum"].contains(&tag(**c))
             })
             .count();
-        self.heading(level, children[..n].iter().map(|c| inline(*c)).collect());
+        self.heading(level, children[..n].iter().map(|c| self.inline(*c)).collect());
         for &child in &children[n..] {
             match tag(child) {
                 "TableStruct" => self.table(child, ""),
@@ -569,6 +582,25 @@ pub(crate) mod tests {
         assert_eq!(
             r.unknown,
             Counts::from([("Fig without image".to_string(), 1)])
+        );
+        check(&xml, &r.markdown, "t").unwrap();
+    }
+
+    #[test]
+    fn figures_in_text_and_table_cells_are_inline_links() {
+        let xml = law("<MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>記号<QuoteStruct><Fig src=\"./pict/k.jpg\"/></QuoteStruct>を付す。</Sentence></ParagraphSentence>\
+            <TableStruct><Table><TableRow><TableColumn><FigStruct><Fig src=\"./pict/t.jpg\"/></FigStruct></TableColumn>\
+            <TableColumn><Sentence>甲<Fig src=\"\"/></Sentence></TableColumn></TableRow></Table></TableStruct></Paragraph></MainProvision>");
+        let r = render_doc(&parse(&xml).unwrap(), Some("R")).unwrap();
+        let link = |f: &str| format!("<a href=\"{ATTACHMENT}R?src=./pict/{f}\">{f}</a>");
+        assert!(
+            r.markdown.ends_with(&format!(
+                "記号{}を付す。\n\n<table>\n<tr>\n<td>{}</td>\n<td>甲{NO_IMAGE}</td>\n</tr>\n</table>\n",
+                link("k.jpg"),
+                link("t.jpg")
+            )),
+            "{}",
+            r.markdown
         );
         check(&xml, &r.markdown, "t").unwrap();
     }

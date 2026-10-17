@@ -14,4 +14,4 @@ disable = [
 front-matter-title = ""  # frontmatter title is metadata, the H1 is the law title
 
 [MD033]
-allowed-elements = ["ruby", "rt", "sup", "sub", "table", "tr", "th", "td", "br"]
+allowed-elements = ["a", "ruby", "rt", "sup", "sub", "table", "tr", "th", "td", "br"]

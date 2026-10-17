@@ -5,6 +5,8 @@
 
 use roxmltree::Node;
 
+use crate::render::inline_figure;
+
 pub type El<'a, 'i> = Node<'a, 'i>;
 
 pub fn tag<'a>(el: El<'a, '_>) -> &'a str {
@@ -66,7 +68,7 @@ pub fn retain_non_ascii_ws(s: &mut String) {
     s.retain(|c| !matches!(c, ' ' | '\t' | '\r' | '\n'));
 }
 
-fn push_inline(el: El, out: &mut String) {
+fn push_inline(el: El, revision: Option<&str>, out: &mut String) {
     push_text(el, out);
     for child in elements(el) {
         match tag(child) {
@@ -76,10 +78,10 @@ fn push_inline(el: El, out: &mut String) {
                 for c in elements(child) {
                     if tag(c) == "Rt" {
                         out.push_str("<rt>");
-                        push_inline(c, out);
+                        push_inline(c, revision, out);
                         out.push_str("</rt>");
                     } else {
-                        push_inline(c, out);
+                        push_inline(c, revision, out);
                     }
                     push_tail(c, out);
                 }
@@ -88,18 +90,25 @@ fn push_inline(el: El, out: &mut String) {
             t @ ("Sup" | "Sub") => {
                 let t = t.to_lowercase();
                 out.push_str(&format!("<{t}>"));
-                push_inline(child, out);
+                push_inline(child, revision, out);
                 out.push_str(&format!("</{t}>"));
             }
-            _ => push_inline(child, out),
+            "Fig" => {
+                if let Some(rid) = revision {
+                    out.push_str(&inline_figure(rid, child.attribute("src").unwrap_or("")));
+                }
+            }
+            _ => push_inline(child, revision, out),
         }
         push_tail(child, out);
     }
 }
 
-pub fn inline(el: El) -> String {
+/// The text of an element with its markup as HTML; with a revision ID, figures in the text
+/// link to that revision's attachments.
+pub fn inline(el: El, revision: Option<&str>) -> String {
     let mut s = String::new();
-    push_inline(el, &mut s);
+    push_inline(el, revision, &mut s);
     strip_pretty(&s)
 }
 
@@ -109,7 +118,7 @@ mod tests {
 
     fn inline_of(xml: &str) -> String {
         let doc = roxmltree::Document::parse(xml).unwrap();
-        inline(doc.root_element())
+        inline(doc.root_element(), None)
     }
 
     #[test]

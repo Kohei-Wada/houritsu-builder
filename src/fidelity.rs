@@ -5,10 +5,12 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::render::{
-    law_body, parse, suppl_source, ATTACHMENT, CONTAINERS, NO_IMAGE, SKIPPED_TAGS,
-};
+use crate::render::{law_body, parse, suppl_source, ATTACHMENT, CONTAINERS, NO_IMAGE};
 use crate::xmltext::{elements, push_tail, push_text, retain_non_ascii_ws, tag, El};
+
+/// The only text left out on purpose: the table of contents repeats the headings. Kept apart from
+/// what the renderer skips, so that skipping anything else fails the check.
+const OUT_OF_SCOPE: [&str; 1] = ["TOC"];
 
 // Rare (after an escaping backslash); the per-line work below avoids Regex, whose shared cache serialises threads.
 static DIGIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d").unwrap());
@@ -72,7 +74,7 @@ pub fn doc_text(doc: &roxmltree::Document) -> anyhow::Result<String> {
     let mut out = String::with_capacity(doc.input_text().len() / 2);
     push_text(body, &mut out);
     for c in elements(body) {
-        if !SKIPPED_TAGS.contains(&tag(c)) {
+        if !OUT_OF_SCOPE.contains(&tag(c)) {
             walk(c, &mut out, "", false);
         }
         push_tail(c, &mut out);
@@ -130,12 +132,18 @@ fn tag_len(s: &str) -> Option<usize> {
     Some(s.len() - after.len() + after.find('>')? + 1)
 }
 
+/// The length of a renderer-written link to a figure (`render::inline_figure`) at the start of `s`.
+fn figure_link_len(s: &str) -> Option<usize> {
+    let rest = s.strip_prefix("<a href=\"")?.strip_prefix(ATTACHMENT)?;
+    Some(s.len() - rest.len() + rest.find("</a>")? + "</a>".len())
+}
+
 fn push_without_tags(line: &str, out: &mut String) {
     let mut rest = line;
     while let Some(i) = rest.find('<') {
         out.push_str(&rest[..i]);
         rest = &rest[i..];
-        match tag_len(rest) {
+        match figure_link_len(rest).or_else(|| tag_len(rest)) {
             Some(n) => rest = &rest[n..],
             None => {
                 out.push('<');
@@ -158,7 +166,12 @@ pub fn md_text(md: &str) -> String {
     let mut joined = String::with_capacity(md.len());
     for line in without_frontmatter(md).split('\n') {
         if !is_figure_line(line) {
-            push_without_tags(unescape(strip_prefix(line)), &mut joined);
+            let line = unescape(strip_prefix(line));
+            if line.contains(NO_IMAGE) {
+                push_without_tags(&line.replace(NO_IMAGE, ""), &mut joined);
+            } else {
+                push_without_tags(line, &mut joined);
+            }
         }
     }
     retain_non_ascii_ws(&mut joined);
