@@ -304,7 +304,10 @@ impl Renderer {
             }
             (Some(_), _) => {
                 // e-Gov has no image for this figure: say so rather than leave a silent gap
-                *self.unknown.entry("Fig without image".to_string()).or_default() += 1;
+                *self
+                    .unknown
+                    .entry("Fig without image".to_string())
+                    .or_default() += 1;
                 self.block(format!("{indent}{NO_IMAGE}"));
             }
             (None, _) => *self.unknown.entry("Fig".to_string()).or_default() += 1,
@@ -557,8 +560,16 @@ pub(crate) mod tests {
     fn figure_without_an_image_is_marked() {
         let xml = law("<AppdxFig><AppdxFigTitle>別図</AppdxFigTitle><FigStruct><Fig src=\"\"/></FigStruct></AppdxFig>");
         let r = render_doc(&parse(&xml).unwrap(), Some("R")).unwrap();
-        assert!(r.markdown.ends_with("## 別図\n\n（図：e-Gov に画像なし）\n"), "{}", r.markdown);
-        assert_eq!(r.unknown, Counts::from([("Fig without image".to_string(), 1)]));
+        assert!(
+            r.markdown
+                .ends_with("## 別図\n\n（図：e-Gov に画像なし）\n"),
+            "{}",
+            r.markdown
+        );
+        assert_eq!(
+            r.unknown,
+            Counts::from([("Fig without image".to_string(), 1)])
+        );
         check(&xml, &r.markdown, "t").unwrap();
     }
 
