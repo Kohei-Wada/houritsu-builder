@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::render::{law_body, parse, suppl_source, CONTAINERS, SKIPPED_TAGS};
+use crate::render::{law_body, parse, suppl_source, ATTACHMENT, CONTAINERS, SKIPPED_TAGS};
 use crate::xmltext::{elements, push_tail, push_text, retain_non_ascii_ws, tag, El};
 
 // Rare (after an escaping backslash); the per-line work below avoids Regex, whose shared cache serialises threads.
@@ -114,17 +114,25 @@ fn strip_prefix(line: &str) -> &str {
     }
 }
 
-const TAGS: [&str; 8] = [
-    "<ruby>", "</ruby>", "<rt>", "</rt>", "<sup>", "</sup>", "<sub>", "</sub>",
-];
+/// The HTML the renderer writes: ruby and super/subscripts in text, and tables.
+const TAGS: [&str; 9] = ["ruby", "rt", "sup", "sub", "table", "tr", "th", "td", "br"];
+
+/// The length of a renderer-written tag at the start of `s`, attributes included.
+fn tag_len(s: &str) -> Option<usize> {
+    let name = s.strip_prefix('<')?;
+    let name = name.strip_prefix('/').unwrap_or(name);
+    let t = TAGS.iter().find(|t| name.starts_with(**t) && name[t.len()..].starts_with(['>', ' ']))?;
+    let after = &name[t.len()..];
+    Some(s.len() - after.len() + after.find('>')? + 1)
+}
 
 fn push_without_tags(line: &str, out: &mut String) {
     let mut rest = line;
     while let Some(i) = rest.find('<') {
         out.push_str(&rest[..i]);
         rest = &rest[i..];
-        match TAGS.iter().find(|t| rest.starts_with(**t)) {
-            Some(t) => rest = &rest[t.len()..],
+        match tag_len(rest) {
+            Some(n) => rest = &rest[n..],
             None => {
                 out.push('<');
                 rest = &rest[1..];
@@ -134,10 +142,18 @@ fn push_without_tags(line: &str, out: &mut String) {
     out.push_str(rest);
 }
 
+/// A line the renderer wrote for a figure: a link to an e-Gov attachment, not statute text.
+fn is_attachment_link(line: &str) -> bool {
+    let t = line.trim_start_matches(' ');
+    t.starts_with('[') && t.ends_with(')') && t.contains(&format!("]({ATTACHMENT}"))
+}
+
 pub fn md_text(md: &str) -> String {
     let mut joined = String::with_capacity(md.len());
     for line in without_frontmatter(md).split('\n') {
-        push_without_tags(unescape(strip_prefix(line)), &mut joined);
+        if !is_attachment_link(line) {
+            push_without_tags(unescape(strip_prefix(line)), &mut joined);
+        }
     }
     retain_non_ascii_ws(&mut joined);
     joined
@@ -201,6 +217,9 @@ mod tests {
         let mut out = String::new();
         push_without_tags("a<ruby>漢<rt>かん</rt></ruby><b>x</sup>", &mut out);
         assert_eq!(out, "a漢かん<b>x");
+        let mut out = String::new();
+        push_without_tags("<tr><td rowspan=\"2\">甲<br>乙</td><th>丙</th></tr><trx><tdd>", &mut out);
+        assert_eq!(out, "甲乙丙<trx><tdd>");
     }
 
     #[test]
@@ -275,13 +294,14 @@ mod tests {
 
     #[test]
     fn markdown_markers_in_statute_text_are_escaped() {
-        let cells: String = ["-", "# 注", "1. 一", "=", "> 引用"]
+        let remarks: String = ["-", "# 注", "1. 一", "=", "> 引用"]
             .iter()
-            .map(|t| format!("<TableColumn><Sentence>{t}</Sentence></TableColumn>"))
+            .map(|t| format!("<Remarks><Sentence>{t}</Sentence></Remarks>"))
             .collect();
         let xml = format!(
             "<Law><LawBody><MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>本文。</Sentence></ParagraphSentence>\
-             <Item><ItemSentence><Sentence>- 項目</Sentence></ItemSentence><TableStruct><Table><TableRow>{cells}</TableRow></Table></TableStruct></Item>\
+             <Item><ItemSentence><Sentence>- 項目</Sentence></ItemSentence><TableStruct>{remarks}<Table><TableRow>\
+             <TableColumn><Sentence># 表</Sentence></TableColumn></TableRow></Table></TableStruct></Item>\
              </Paragraph></MainProvision></LawBody></Law>"
         );
         let m = md(&xml);
@@ -290,6 +310,8 @@ mod tests {
                 && m.contains("- \\- 項目")
                 && m.contains("  \\# 注")
                 && m.contains("\\1. 一")
+                && m.contains("  <td># 表</td>"), // markdown is not parsed inside HTML
+            "{m}"
         );
         check(&xml, &m, "x").unwrap();
     }

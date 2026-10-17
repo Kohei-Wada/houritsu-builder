@@ -54,6 +54,17 @@ pub struct Rendered {
 struct Renderer {
     blocks: Vec<String>,
     unknown: Counts,
+    /// The revision being rendered; figures link to its attachments.
+    revision: Option<String>,
+}
+
+/// Containers of a 様式, 書式, 注記 or 図: a title, remarks and the body, rendered part by part.
+const STRUCTS: [&str; 7] = ["StyleStruct", "FormatStruct", "NoteStruct", "FigStruct", "Style", "Format", "Note"];
+
+pub const ATTACHMENT: &str = "https://laws.e-gov.go.jp/api/2/attachment/";
+
+fn has_loose_text(el: El) -> bool {
+    el.children().any(|c| c.is_text() && !c.text().unwrap_or("").trim().is_empty())
 }
 
 fn same(a: Option<El>, b: El) -> bool {
@@ -74,6 +85,9 @@ impl Renderer {
     }
 
     fn fallback(&mut self, el: El, indent: &str) {
+        if STRUCTS.contains(&tag(el)) {
+            return self.structure(el, indent);
+        }
         *self.unknown.entry(tag(el).to_string()).or_default() += 1;
         let text = inline(el);
         if !text.is_empty() {
@@ -176,7 +190,7 @@ impl Renderer {
                 t if is_item(t) => self.item(child, 0),
                 "TableStruct" => self.table(child, ""),
                 "List" => self.list(child, 0),
-                "FigStruct" => self.figstruct(child),
+                "FigStruct" => self.structure(child, ""),
                 _ => self.fallback(child, ""),
             }
         }
@@ -242,29 +256,69 @@ impl Renderer {
         }
     }
 
-    fn figstruct(&mut self, el: El) {
+    fn structure(&mut self, el: El, indent: &str) {
         for child in elements(el) {
-            if tag(child) == "Fig" {
-                *self.unknown.entry("Fig".to_string()).or_default() += 1;
-            } else {
-                self.block(literal(&inline(child)));
+            match tag(child) {
+                "Fig" => self.fig(child, indent),
+                "TableStruct" => self.table(child, indent),
+                "Table" => self.html_table(child, indent),
+                t if STRUCTS.contains(&t) => self.structure(child, indent),
+                _ => {
+                    let text = inline(child);
+                    if !text.is_empty() {
+                        self.block(format!("{indent}{}", literal(&text)));
+                    }
+                }
             }
+        }
+    }
+
+    /// A figure is an attached image or PDF; link to it on e-Gov, one line, nothing else on it.
+    fn fig(&mut self, el: El, indent: &str) {
+        match (&self.revision, el.attribute("src")) {
+            (Some(rid), Some(src)) if !src.is_empty() => {
+                let name = src.rsplit('/').next().unwrap_or(src);
+                self.block(format!("{indent}[{name}]({ATTACHMENT}{rid}?src={src})"));
+            }
+            _ => *self.unknown.entry("Fig".to_string()).or_default() += 1,
         }
     }
 
     fn table(&mut self, el: El, indent: &str) {
         for child in elements(el) {
-            let cells: Vec<El> = if tag(child) == "Table" {
-                elements(child).flat_map(|row| elements(row)).collect()
+            if tag(child) == "Table" {
+                self.html_table(child, indent);
             } else {
-                vec![child]
-            };
-            for text in cells.into_iter().map(inline) {
+                let text = inline(child);
                 if !text.is_empty() {
                     self.block(format!("{indent}{}", literal(&text)));
                 }
             }
         }
+    }
+
+    /// An HTML table, one cell per line, so merged cells survive and a changed cell is a
+    /// one-line diff. Markdown is not parsed inside, so cells are not escaped.
+    fn html_table(&mut self, el: El, indent: &str) {
+        let mut lines = vec!["<table>".to_string()];
+        for row in elements(el) {
+            lines.push("<tr>".to_string());
+            for col in elements(row) {
+                let cell = if tag(col) == "TableHeaderColumn" { "th" } else { "td" };
+                let mut attrs = String::new();
+                for name in ["rowspan", "colspan"] {
+                    if let Some(n) = col.attribute(name).filter(|n| !n.is_empty() && *n != "1") {
+                        attrs.push_str(&format!(" {name}=\"{n}\""));
+                    }
+                }
+                let parts: Vec<String> = elements(col).map(inline).filter(|t| !t.is_empty()).collect();
+                let content = if has_loose_text(col) || parts.is_empty() { inline(col) } else { parts.join("<br>") };
+                lines.push(format!("<{cell}{attrs}>{content}</{cell}>"));
+            }
+            lines.push("</tr>".to_string());
+        }
+        lines.push("</table>".to_string());
+        self.block(lines.iter().map(|l| format!("{indent}{l}")).collect::<Vec<_>>().join("\n"));
     }
 
     fn suppl(&mut self, el: El) {
@@ -326,8 +380,12 @@ pub fn law_body<'a, 'i>(doc: &'a roxmltree::Document<'i>) -> anyhow::Result<El<'
     find(doc.root_element(), "LawBody").ok_or_else(|| anyhow::anyhow!("no LawBody"))
 }
 
-pub fn render_doc(doc: &roxmltree::Document) -> anyhow::Result<Rendered> {
-    let mut r = Renderer::default();
+/// Renders a revision; with its ID, figures link to the revision's attachments on e-Gov.
+pub fn render_doc(doc: &roxmltree::Document, revision: Option<&str>) -> anyhow::Result<Rendered> {
+    let mut r = Renderer {
+        revision: revision.map(str::to_string),
+        ..Default::default()
+    };
     r.body(law_body(doc)?);
     Ok(Rendered {
         markdown: r.blocks.join("\n\n") + "\n",
@@ -336,7 +394,7 @@ pub fn render_doc(doc: &roxmltree::Document) -> anyhow::Result<Rendered> {
 }
 
 pub fn render_law(xml: &str) -> anyhow::Result<Rendered> {
-    render_doc(&parse(xml)?)
+    render_doc(&parse(xml)?, None)
 }
 
 #[cfg(test)]
@@ -418,11 +476,34 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn table_cells_become_blocks() {
+    fn table_is_an_html_table_with_one_cell_per_line() {
         let xml = law("<MainProvision><Paragraph><ParagraphNum/><ParagraphSentence><Sentence>次の表のとおり。</Sentence></ParagraphSentence>\
-            <TableStruct><Table><TableRow><TableColumn><Sentence>元日</Sentence></TableColumn>\
-            <TableColumn><Sentence>一月一日</Sentence></TableColumn></TableRow></Table></TableStruct></Paragraph></MainProvision>");
-        assert!(md(&xml).ends_with("次の表のとおり。\n\n元日\n\n一月一日\n"));
+            <TableStruct><Table><TableHeaderRow><TableHeaderColumn>祝日</TableHeaderColumn><TableHeaderColumn>日付</TableHeaderColumn></TableHeaderRow>\
+            <TableRow><TableColumn rowspan=\"2\"><Sentence>元日</Sentence></TableColumn>\
+            <TableColumn colspan=\"1\"><Sentence>一月一日</Sentence><Sentence>-</Sentence></TableColumn></TableRow>\
+            <TableRow><TableColumn/></TableRow></Table></TableStruct></Paragraph></MainProvision>");
+        let r = checked(&xml);
+        assert!(r.markdown.ends_with(
+            "次の表のとおり。\n\n<table>\n<tr>\n<th>祝日</th>\n<th>日付</th>\n</tr>\n<tr>\n<td rowspan=\"2\">元日</td>\n\
+             <td>一月一日<br>-</td>\n</tr>\n<tr>\n<td></td>\n</tr>\n</table>\n"
+        ));
+        assert!(r.unknown.is_empty());
+    }
+
+    #[test]
+    fn figure_links_to_the_attachment_on_e_gov() {
+        let xml = law("<MainProvision>\
+            <Paragraph><ParagraphNum/><ParagraphSentence><Sentence>其ノ図式左ノ如シ</Sentence></ParagraphSentence></Paragraph>\
+            </MainProvision><AppdxStyle><AppdxStyleTitle>様式第一</AppdxStyleTitle><StyleStruct><StyleStructTitle>申請書</StyleStructTitle>\
+            <Style><Fig src=\"./pict/S1.pdf\"/></Style><Remarks><Sentence>備考</Sentence></Remarks></StyleStruct></AppdxStyle>");
+        let doc = parse(&xml).unwrap();
+        let r = render_doc(&doc, Some("R1")).unwrap();
+        assert!(r.markdown.ends_with(
+            "其ノ図式左ノ如シ\n\n## 様式第一\n\n申請書\n\n[S1.pdf](https://laws.e-gov.go.jp/api/2/attachment/R1?src=./pict/S1.pdf)\n\n備考\n"
+        ));
+        assert!(r.unknown.is_empty(), "{:?}", r.unknown);
+        check(&xml, &r.markdown, "t").unwrap();
+        assert_eq!(render_law(&xml).unwrap().unknown, Counts::from([("Fig".to_string(), 1)]));
     }
 
     #[test]
@@ -452,7 +533,7 @@ pub(crate) mod tests {
              <Sentence>項目</Sentence></TableColumn></TableRow></Table></TableStruct></AppdxTable>",
             para("本文。", "")
         ));
-        assert!(md(&xml).ends_with("## 別表第一（第二条関係）\n\n項目\n"));
+        assert!(md(&xml).ends_with("## 別表第一（第二条関係）\n\n<table>\n<tr>\n<td>項目</td>\n</tr>\n</table>\n"));
     }
 
     #[test]
@@ -543,7 +624,7 @@ pub(crate) mod tests {
             <Fig src=\"./pict/x.jpg\"/></FigStruct></Paragraph></MainProvision>");
         let r = checked(&xml);
         assert!(r.markdown.ends_with("本文。\n\n図１\n\n備考注記\n"));
-        assert_eq!(r.unknown, Counts::from([("Fig".to_string(), 1)]));
+        assert_eq!(r.unknown, Counts::from([("Fig".to_string(), 1)])); // no revision, so no link
     }
 
     #[test]
@@ -570,7 +651,7 @@ pub(crate) mod tests {
              </Item></Paragraph></MainProvision>"
         ));
         assert!(checked(&xml).markdown.ends_with(
-            "- 一 本\n\n  - イ 甲\n\n    表\n\n    元日\n\n    一月一日\n\n    備考\n\n  - ロ 乙\n"
+            "- 一 本\n\n  - イ 甲\n\n    表\n\n    <table>\n    <tr>\n    <td>元日</td>\n    <td>一月一日</td>\n    </tr>\n    </table>\n\n    備考\n\n  - ロ 乙\n"
         ));
     }
 

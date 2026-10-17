@@ -132,7 +132,7 @@ fn render(
     let xml = std::str::from_utf8(&bytes)?;
     let xml = xml.strip_prefix('\u{feff}').unwrap_or(xml);
     let doc = parse(xml).with_context(|| r.revision_id().to_string())?;
-    let rendered = render_doc(&doc).with_context(|| r.revision_id().to_string())?;
+    let rendered = render_doc(&doc, Some(r.revision_id())).with_context(|| r.revision_id().to_string())?;
     check_doc(&doc, &rendered.markdown, r.revision_id())?;
     let text = frontmatter(&r.law_info, &r.rev) + &rendered.markdown;
     let warnings = match linter {
