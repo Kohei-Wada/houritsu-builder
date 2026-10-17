@@ -65,7 +65,9 @@ markdown + git fast-import stream
 houritsu repository  →  GitHub
 ```
 
-The builder is Python, managed with uv. It has two commands.
+The builder is Rust (first written in Python; the Rust port produced byte-identical
+history for all 53,432 revisions and renders about 6× faster per core). It has two
+commands. Lint runs the pinned rumdl through `uvx`.
 
 ### fetch
 
@@ -94,8 +96,8 @@ Checked on 2026-10-17: both law lists take 41 s, and 0 of 8,611 cached laws were
 
 Reads only the cache and rebuilds the whole history from scratch every time. Rendering
 is reused: `rendered.json` in the cache maps each revision to the blob of the last linted
-build, keyed by the revision's data file and metadata and by a hash of the builder's code,
-assets and rumdl version. A revision whose key is unchanged takes its blob from the
+build, keyed by the revision's data file and metadata and by a hash of the builder
+executable and the rumdl version. A revision whose key is unchanged takes its blob from the
 previous repository (borrowed through git alternates, then copied in by `git repack -a`)
 and is neither rendered nor linted again. Workers write new blobs as loose objects, so
 `git fast-import` only builds trees and commits.

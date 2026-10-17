@@ -1,0 +1,161 @@
+use std::sync::LazyLock;
+
+use regex::Regex;
+use serde_json::Value;
+
+/// A JSON string literal as Python's `json.dumps(s, ensure_ascii=False)` writes it,
+/// which the published files were first generated with.
+pub fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap());
+
+fn is_date(s: &str) -> bool {
+    DATE.is_match(s)
+}
+
+fn v(value: Option<&Value>) -> String {
+    match value {
+        None | Some(Value::Null) => "null".to_string(),
+        Some(Value::String(s)) if is_date(s) => s.clone(),
+        Some(Value::String(s)) => json_str(s),
+        Some(Value::Bool(b)) => json_str(if *b { "True" } else { "False" }),
+        Some(other) => json_str(&other.to_string()),
+    }
+}
+
+/// Python's `a or b` on a JSON value: null, missing and "" fall through.
+pub fn truthy<'a>(value: Option<&'a Value>) -> Option<&'a Value> {
+    match value {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) if s.is_empty() => None,
+        Some(Value::Bool(false)) => None,
+        other => other,
+    }
+}
+
+pub fn frontmatter(law_info: &Value, rev: &Value) -> String {
+    let law_id = law_info["law_id"].as_str().unwrap_or_default();
+    let mut out = vec!["---".to_string()];
+    for (k, val) in [
+        ("law_id", Some(&law_info["law_id"])),
+        ("law_num", law_info.get("law_num")),
+        ("title", rev.get("law_title")),
+        ("title_kana", rev.get("law_title_kana")),
+        ("abbrev", rev.get("abbrev")),
+        ("law_type", truthy(rev.get("law_type")).or(law_info.get("law_type"))),
+        ("category", rev.get("category")),
+        ("revision_id", Some(&rev["law_revision_id"])),
+    ] {
+        out.push(format!("{k}: {}", v(val)));
+    }
+    out.push("amendment:".to_string());
+    for (k, key) in [
+        ("law_id", "amendment_law_id"),
+        ("law_num", "amendment_law_num"),
+        ("title", "amendment_law_title"),
+        ("promulgated", "amendment_promulgate_date"),
+        ("enforced", "amendment_enforcement_date"),
+    ] {
+        out.push(format!("  {k}: {}", v(rev.get(key))));
+    }
+    out.push(format!("repeal_status: {}", v(rev.get("repeal_status"))));
+    out.push(format!("source: {}", json_str(&format!("https://laws.e-gov.go.jp/law/{law_id}"))));
+    out.push("---".to_string());
+    out.push(String::new());
+    out.push(String::new());
+    out.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn law_info() -> Value {
+        json!({"law_id": "415AC0000000057", "law_num": "平成十五年法律第五十七号", "law_type": "Act"})
+    }
+
+    fn rev() -> Value {
+        json!({
+            "law_revision_id": "415AC0000000057_20261001_507AC0000000070",
+            "law_title": "個人情報の保護に関する法律",
+            "law_title_kana": "こじんじょうほうのほごにかんするほうりつ",
+            "abbrev": "個人情報保護法",
+            "law_type": "Act",
+            "category": "憲法",
+            "amendment_law_id": "507AC0000000070",
+            "amendment_law_num": "令和七年法律第七十号",
+            "amendment_law_title": "日本学術会議法",
+            "amendment_promulgate_date": "2025-06-18",
+            "amendment_enforcement_date": "2026-10-01",
+            "repeal_status": "None",
+            "current_revision_status": "CurrentEnforced",
+            "updated": "2026-07-24T11:46:53+09:00",
+        })
+    }
+
+    #[test]
+    fn exact() {
+        assert_eq!(
+            frontmatter(&law_info(), &rev()),
+            "---\n\
+             law_id: \"415AC0000000057\"\n\
+             law_num: \"平成十五年法律第五十七号\"\n\
+             title: \"個人情報の保護に関する法律\"\n\
+             title_kana: \"こじんじょうほうのほごにかんするほうりつ\"\n\
+             abbrev: \"個人情報保護法\"\n\
+             law_type: \"Act\"\n\
+             category: \"憲法\"\n\
+             revision_id: \"415AC0000000057_20261001_507AC0000000070\"\n\
+             amendment:\n  \
+             law_id: \"507AC0000000070\"\n  \
+             law_num: \"令和七年法律第七十号\"\n  \
+             title: \"日本学術会議法\"\n  \
+             promulgated: 2025-06-18\n  \
+             enforced: 2026-10-01\n\
+             repeal_status: \"None\"\n\
+             source: \"https://laws.e-gov.go.jp/law/415AC0000000057\"\n\
+             ---\n\n"
+        );
+    }
+
+    #[test]
+    fn volatile_fields_excluded_and_nulls() {
+        let mut r = rev();
+        r["abbrev"] = Value::Null;
+        r["amendment_enforcement_date"] = Value::Null;
+        let out = frontmatter(&law_info(), &r);
+        assert!(out.contains("abbrev: null") && out.contains("  enforced: null"));
+        assert!(!out.contains("CurrentEnforced") && !out.contains("updated"));
+    }
+
+    #[test]
+    fn quotes_escape() {
+        let mut r = rev();
+        r["law_title"] = json!("a\"b:c");
+        assert!(frontmatter(&law_info(), &r).contains("title: \"a\\\"b:c\""));
+    }
+
+    #[test]
+    fn json_str_matches_python() {
+        assert_eq!(json_str("a\u{1}\u{7f}\u{2028}\\\t"), "\"a\\u0001\u{7f}\u{2028}\\\\\\t\"");
+    }
+}

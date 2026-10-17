@@ -1,0 +1,27 @@
+[package]
+name = "houritsu-builder"
+version = "0.2.0"
+edition = "2021"
+description = "Builds the houritsu repository: Japanese laws as git history from the e-Gov law API"
+publish = false
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+mimalloc = "0.1"
+rayon = "1"
+regex = "1"
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha1 = "0.10"
+ureq = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
