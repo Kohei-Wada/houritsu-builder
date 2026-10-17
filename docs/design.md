@@ -140,7 +140,9 @@ README.md
   and year of promulgation (`415` = 平成15年). GitHub lists at most 1,000 files per
   directory; this keeps every directory under about 220.
 - File name: the e-Gov law ID. Titles can change on amendment; the ID does not.
-- README holds an index table of title → path for people looking up by title.
+- No index of titles: the frontmatter carries title, kana and law number, so an index is
+  derived by tools outside this repository. An index here would change with every
+  retitling and mix non-law changes into `git log`. The README shows `git grep` by title.
 
 ## File format
 
@@ -198,7 +200,10 @@ Enforced: 2027-01-17
 ```
 
 - The last two lines are git trailers (`git log --format='%(trailers)'`) for tools.
-- Author and committer dates: enforcement date, 00:00 +09:00.
+- Author and committer dates: enforcement date, 00:00 +09:00. git rejects dates before 1970
+  (`git commit` refuses them; a negative time from fast-import fails `git fsck` with
+  `badDate`, checked with git 2.56 on 2026-10-17), so earlier dates become 1970-01-02;
+  the `Enforced` trailer and frontmatter keep the real date.
 - Author: the amending law's number with an empty email (`令和八年法律第五十六号 <>`), so
   `git shortlog` groups by amending law; committer: `houritsu-builder`. No address
   implies e-Gov wrote the commit; the source is credited in the README and frontmatter.
@@ -242,7 +247,7 @@ Each check runs in tests and on every build; any failure fails the build.
 2. Build for Acts (法律) only from the partial cache, with all quality checks green;
    push to private `houritsu`.
 3. Extend the build to all law types.
-4. Daily timer and README index.
+4. Daily timer.
 5. Before going public: check the e-Gov terms of use (attribution, disclaimer that
    the official text is the 官報).
 
