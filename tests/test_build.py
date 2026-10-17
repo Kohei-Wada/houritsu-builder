@@ -178,3 +178,41 @@ def test_worker_error_propagates_and_cleans_up(cache, tmp_path):
     with pytest.raises(ET.ParseError):
         build(cache, tmp_path / "out", lint=False, jobs=2)
     assert not (tmp_path / "out.building").exists()
+
+
+def test_rebuild_reuses_blobs_of_the_previous_build(cache, tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    first = build(cache, out, lint=True, jobs=1)
+    head = git(out, "rev-parse", "main")
+    second = build(cache, out, lint=True, jobs=1)
+    assert first["rendered"] == first["files"] > 0 and second["rendered"] == 0
+    assert git(out, "rev-parse", "main") == head
+    assert not (out / ".git" / "objects" / "info" / "alternates").exists()
+    git(out, "fsck", "--strict", "--no-dangling")
+
+    monkeypatch.setattr("houritsu_builder.build._code_version", lambda: "changed")
+    assert build(cache, out, lint=True, jobs=1)["rendered"] == first["files"]
+
+
+def test_rebuild_renders_again_when_the_previous_build_is_gone(cache, tmp_path):
+    build(cache, tmp_path / "a", lint=True, jobs=1)
+    assert build(cache, tmp_path / "b", lint=True, jobs=1)["rendered"] > 0
+
+
+def test_no_lint_build_does_not_let_later_builds_skip_lint(cache, tmp_path):
+    out = tmp_path / "out"
+    first = build(cache, out, lint=False, jobs=1)
+    assert build(cache, out, lint=True, jobs=1)["rendered"] == first["files"]
+
+
+def test_rebuild_renders_a_revision_whose_data_changed(cache, tmp_path):
+    import os
+
+    from conftest import LAW_ID
+
+    out = tmp_path / "out"
+    build(cache, out, lint=True, jobs=1)
+    rid = cache.read(cache.revisions_path(LAW_ID))["revisions"][0]["law_revision_id"]
+    path = cache.data_path(rid)
+    os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 1))
+    assert build(cache, out, lint=True, jobs=1)["rendered"] == 1

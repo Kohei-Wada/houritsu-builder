@@ -1,5 +1,7 @@
 import base64
 import collections
+import hashlib
+import importlib.metadata
 import json
 import os
 import shutil
@@ -18,6 +20,7 @@ from houritsu_builder.history import Revision, load_revisions, plan
 from houritsu_builder.render import render_law
 
 MARKER = ".git/houritsu-build"
+RENDERED = "rendered.json"  # revision → blob of the last build, reused while the inputs are unchanged
 RUMDL = str(Path(sysconfig.get_path("scripts")) / "rumdl")
 
 
@@ -37,6 +40,35 @@ def _prepare(staging: Path) -> None:
     _clear(staging)
     subprocess.run(["git", "init", "-q", "-b", "main", str(staging)], check=True)
     (staging / MARKER).write_text("created by houritsu-builder\n")
+
+
+def _code_version() -> str:
+    h = hashlib.sha1(importlib.metadata.version("rumdl").encode())
+    pkg = Path(__file__).parent
+    for p in sorted(pkg.rglob("*")):
+        if p.is_file() and p.suffix in {".py", ".md", ".toml"}:
+            h.update(p.relative_to(pkg).as_posix().encode() + b"\0" + p.read_bytes())
+    return h.hexdigest()
+
+
+def _input_key(cache: Cache, r: Revision) -> str:
+    st = cache.data_path(r.revision_id).stat()
+    meta = json.dumps([r.law_info, r.rev], ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(f"{st.st_size} {st.st_mtime_ns} {meta}".encode()).hexdigest()
+
+
+def _load_rendered(cache: Cache, out: Path, version: str) -> dict:
+    path = cache.root / RENDERED
+    if not path.exists() or not (out / MARKER).exists():
+        return {}
+    doc = json.loads(path.read_text())
+    if doc.get("version") != version:
+        return {}
+    entries = doc["entries"]
+    found = subprocess.run(["git", "cat-file", "--batch-check=%(objectname)"], cwd=out, capture_output=True, text=True, check=True,
+                           input="".join(e[1] + "\n" for e in entries.values()))
+    present = {line for line in found.stdout.splitlines() if not line.endswith(" missing")}
+    return {rid: e for rid, e in entries.items() if e[1] in present}
 
 
 def _render(root: Path, objects: Path, r: Revision, lint_file: Path | None) -> tuple[str, collections.Counter]:
@@ -64,11 +96,15 @@ def _rendered_in_order(tasks, jobs: int):
             yield result
 
 
-def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir: Path | None, unknown, jobs: int) -> int:
+def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir: Path | None, unknown, jobs: int,
+            previous: dict) -> tuple[int, dict]:
     todo = [r for g in main_groups + upcoming_groups for r in g.revisions if not r.repealed]
+    keys = {r.revision_id: _input_key(cache, r) for r in todo}
+    hits = {rid: previous[rid] for rid, key in keys.items() if rid in previous and previous[rid][0] == key}
     rendered = _rendered_in_order(((cache.root, staging / ".git" / "objects", r,
                                     lint_dir / r.path.removesuffix(".md") / f"{r.revision_id}.md" if lint_dir else None)
-                                   for r in todo), jobs)
+                                   for r in todo if r.revision_id not in hits), jobs)
+    entries = {}
     proc = subprocess.Popen(["git", "fast-import", "--quiet", "--done"], cwd=staging, stdin=subprocess.PIPE)
     files = 0
     try:
@@ -83,7 +119,12 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
                     if r.repealed:
                         deleted.add(r.path)
                         continue
-                    blobs[r.path], found = next(rendered)
+                    if r.revision_id in hits:
+                        _, sha, found = hits[r.revision_id]
+                    else:
+                        sha, found = next(rendered)
+                    blobs[r.path] = sha
+                    entries[r.revision_id] = [keys[r.revision_id], sha, dict(found)]
                     unknown.update(found)
                     files += 1
                 from_ref = "refs/heads/main" if ref.endswith("upcoming") and i == 0 else None
@@ -104,7 +145,7 @@ def _stream(cache: Cache, staging: Path, main_groups, upcoming_groups, lint_dir:
         proc.wait()
     if proc.returncode != 0:
         raise SystemExit("git fast-import failed")
-    return files
+    return files, entries
 
 
 def _copy_remote_config(old: Path, new: Path) -> None:
@@ -129,6 +170,11 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
     if out.exists() and any(out.iterdir()) and not (out / MARKER).exists():
         raise SystemExit(f"{out} is not empty and not a previous build; refusing to touch it")
     _prepare(staging)
+    version = _code_version()
+    previous = _load_rendered(cache, out, version)
+    alternates = staging / ".git" / "objects" / "info" / "alternates"
+    if previous:
+        alternates.write_text(f"{(out / '.git' / 'objects').resolve()}\n")
     lint_dir = cache.root / "lint"
     try:
         revisions, excluded, skipped = load_revisions(cache, law_type)
@@ -137,14 +183,16 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
         if lint:
             shutil.rmtree(lint_dir, ignore_errors=True)
             lint_dir.mkdir(parents=True)
-        files = _stream(cache, staging, main_groups, upcoming_groups, lint_dir if lint else None, unknown, jobs)
+        files, entries = _stream(cache, staging, main_groups, upcoming_groups, lint_dir if lint else None, unknown, jobs, previous)
         subprocess.run(["git", "reset", "-q", "--hard", "main"], cwd=staging, check=True)
-        subprocess.run(["git", "repack", "-adq"], cwd=staging, check=True)  # loose blobs → one delta-compressed pack
+        subprocess.run(["git", "repack", "-adq"], cwd=staging, check=True)  # loose and borrowed blobs → one delta-compressed pack
+        alternates.unlink(missing_ok=True)
 
         report = {
             "commits_main": len(main_groups),
             "commits_upcoming": len(upcoming_groups),
             "files": files,
+            "rendered": sum(1 for rid in entries if previous.get(rid) != entries[rid]),
             "excluded": excluded,
             "skipped": skipped,
             "unknown": dict(unknown.most_common()),
@@ -160,6 +208,8 @@ def build(cache: Cache, out: Path, law_type: str | None = None, lint: bool = Tru
         _clear(out)
         out.rmdir()
         staging.rename(out)
+        if lint:  # entries from a --no-lint build were never linted, so they must not skip lint later
+            (cache.root / RENDERED).write_text(json.dumps({"version": version, "entries": entries}, ensure_ascii=False))
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
