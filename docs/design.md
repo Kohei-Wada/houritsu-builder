@@ -291,9 +291,8 @@ Each check runs in tests and on every build; any failure fails the build.
 
 ## Operations
 
-- Repositories cloned with ghq under `~/ghq/github.com/Kohei-Wada/`.
-- Cache at `~/.cache/houritsu/`.
-- A systemd user timer runs fetch → build → push daily, once the format is stable.
+- One build host keeps the cache at `~/.cache/houritsu/`.
+- A systemd timer runs fetch → build → push daily, with `fetch --full` on Sundays.
 
 ## Milestones
 
