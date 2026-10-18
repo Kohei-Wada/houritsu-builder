@@ -99,6 +99,10 @@ law found in a refetched list is looked up with `/laws?amendment_law_id=`, which
 every law it amends, so a revision inserted mid-history is not missed. A run with
 `--full` refetches every list and catches anything these checks miss; run it weekly.
 Checked on 2026-10-17: both law lists take 41 s, and 0 of 8,611 cached laws were stale.
+A cached full text is fetched again when its revision's `updated` in the refetched list
+differs from the cached list's, so a text e-Gov corrects in place is picked up (the body's
+own `updated` does not match the list's). Checked on 2026-10-18: 0 of 831 sampled
+revisions had changed since the crawl.
 
 ### build
 

@@ -258,19 +258,31 @@ impl Run<'_> {
         Ok(())
     }
 
-    /// Refetches one law's revision list and fetches the full texts not cached yet.
+    /// Refetches one law's revision list and fetches the full texts not cached yet or whose
+    /// revision e-Gov has updated since.
     fn law(&self, i: usize, id: &str) -> anyhow::Result<()> {
         let revisions = match self.client.get_json(&format!("law_revisions/{id}"), &[]) {
             Ok(r) => r,
             Err(e) => return self.fail("law_revisions", id, &e),
         };
         let path = self.cache.revisions_path(id);
+        let mut updated = HashMap::new();
         if path.exists() {
-            let old = amendments(revisions_of(&self.cache.read(&path)?));
+            let cached = self.cache.read(&path)?;
+            let old = amendments(revisions_of(&cached));
             let added = amendments(revisions_of(&revisions))
                 .into_iter()
                 .filter(|a| !old.contains(a));
             self.new_amendments.lock().unwrap().extend(added);
+            for r in revisions_of(&cached) {
+                updated.insert(
+                    r["law_revision_id"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    r["updated"].clone(),
+                );
+            }
         }
         self.cache.write(&path, &revisions)?;
         let list = revisions_of(&revisions);
@@ -278,7 +290,7 @@ impl Run<'_> {
         for rev in list {
             let rid = rev["law_revision_id"].as_str().unwrap_or_default();
             let path = self.cache.data_path(rid);
-            if path.exists() {
+            if path.exists() && updated.get(rid).is_none_or(|u| *u == rev["updated"]) {
                 continue;
             }
             match self.client.get_json(
@@ -520,6 +532,56 @@ mod tests {
         assert!(std::fs::read_to_string(d.path().join("failures.jsonl"))
             .unwrap()
             .contains("law_revisions"));
+    }
+
+    #[test]
+    fn fetch_refetches_a_cached_text_whose_revision_was_updated() {
+        let d = tempfile::tempdir().unwrap();
+        let cache = Cache::new(d.path());
+        let mut old = rev("A_1", None, "CurrentEnforced", "2020-01-01");
+        cache
+            .write(
+                &cache.revisions_path("A"),
+                &doc(
+                    "A",
+                    vec![
+                        old.clone(),
+                        rev("A_2", None, "CurrentEnforced", "2021-01-01"),
+                    ],
+                ),
+            )
+            .unwrap();
+        for rid in ["A_1", "A_2"] {
+            cache
+                .write(&cache.data_path(rid), &json!({"law_full_text": "old"}))
+                .unwrap();
+        }
+        old["updated"] = json!("u2");
+        let fake = Fake::new(vec![
+            (
+                "law_revisions/A",
+                fixed(doc(
+                    "A",
+                    vec![old, rev("A_2", None, "CurrentEnforced", "2021-01-01")],
+                )),
+            ),
+            ("law_data/A_1", fixed(json!({"law_full_text": "corrected"}))),
+        ]);
+        fetch(
+            &fake,
+            &cache,
+            &Options {
+                law_ids: vec!["A".into()],
+                ..opts()
+            },
+            &quiet,
+        )
+        .unwrap();
+        assert_eq!(fake.calls(), ["law_revisions/A", "law_data/A_1"]);
+        assert_eq!(
+            cache.read(&cache.data_path("A_1")).unwrap(),
+            json!({"law_full_text": "corrected"})
+        );
     }
 
     #[test]
