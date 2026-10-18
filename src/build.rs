@@ -5,19 +5,17 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context};
-use base64::Engine;
 use rayon::prelude::*;
 use serde_json::{json, Value};
 
 use crate::bills::Bills;
+use crate::blob::render_all;
 use crate::cache::Cache;
-use crate::fastimport::{write_blob, Commit, Stream};
-use crate::fidelity::check_doc;
-use crate::frontmatter::frontmatter;
+use crate::fastimport::{Commit, Stream};
 use crate::git;
 use crate::history::{load_revisions, plan, Group, Revision};
 use crate::lint::{self, Linter};
-use crate::render::{parse, render_doc, Counts};
+use crate::render::Counts;
 use crate::reuse::{self, Entries, Entry};
 
 const MARKER: &str = ".git/houritsu-build";
@@ -106,72 +104,6 @@ fn prepare(staging: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-struct Rendered {
-    sha: String,
-    unknown: Counts,
-    warnings: Vec<String>,
-}
-
-fn render(
-    cache: &Cache,
-    objects: &Path,
-    r: &Revision,
-    linter: Option<&Linter>,
-) -> anyhow::Result<Rendered> {
-    #[derive(serde::Deserialize)]
-    struct Data<'a> {
-        #[serde(borrow)]
-        law_full_text: Option<std::borrow::Cow<'a, str>>,
-    }
-    let raw = cache.read_raw(&cache.data_path(r.revision_id()))?;
-    let data: Data = serde_json::from_slice(&raw).with_context(|| r.revision_id().to_string())?;
-    let b64 = data.law_full_text.as_deref().unwrap_or_default();
-    let engine = &base64::engine::general_purpose::STANDARD;
-    let bytes = engine
-        .decode(b64)
-        .or_else(|_| engine.decode(b64.split_ascii_whitespace().collect::<String>()))?;
-    let xml = std::str::from_utf8(&bytes)?;
-    let xml = xml.strip_prefix('\u{feff}').unwrap_or(xml);
-    let doc = parse(xml).with_context(|| r.revision_id().to_string())?;
-    let rendered =
-        render_doc(&doc, Some(r.revision_id())).with_context(|| r.revision_id().to_string())?;
-    check_doc(&doc, &rendered.markdown, r.revision_id())?;
-    let text = frontmatter(&r.law_info, &r.rev) + &rendered.markdown;
-    let warnings = match linter {
-        Some(l) => l.check(
-            &format!(
-                "{}/{}.md",
-                r.path().trim_end_matches(".md"),
-                r.revision_id()
-            ),
-            &text,
-        )?,
-        None => vec![],
-    };
-    Ok(Rendered {
-        sha: write_blob(objects, text.as_bytes())?,
-        unknown: rendered.unknown,
-        warnings,
-    })
-}
-
-fn render_all(
-    cache: &Cache,
-    objects: &Path,
-    todo: &[&Revision],
-    linter: Option<&Linter>,
-    jobs: usize,
-) -> anyhow::Result<Vec<Rendered>> {
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(jobs.max(1))
-        .build()?;
-    pool.install(|| {
-        todo.par_iter()
-            .map(|r| render(cache, objects, r, linter))
-            .collect()
-    })
-}
-
 struct Streamed {
     files: usize,
     entries: Entries,
@@ -205,10 +137,10 @@ fn stream(
         .flat_map(|g| &g.revisions)
         .filter(|r| !r.repealed())
         .collect();
-    let mut keys = HashMap::new();
-    for r in &all {
-        keys.insert(r.revision_id().to_string(), reuse::input_key(cache, r)?);
-    }
+    let keys: HashMap<String, String> = all
+        .par_iter()
+        .map(|r| Ok((r.revision_id().to_string(), reuse::input_key(cache, r)?)))
+        .collect::<anyhow::Result<_>>()?;
     let hits: HashMap<&str, &Entry> = all
         .iter()
         .filter_map(|r| {
@@ -426,6 +358,7 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
 mod tests {
     use super::*;
     use crate::testutil::{fixture_cache, LAW_ID};
+    use base64::Engine;
 
     fn sh(repo: &Path, args: &[&str]) -> String {
         git::run(repo, args).unwrap()
@@ -732,9 +665,13 @@ mod tests {
         let path = cache.data_path(&rid);
         let f = fs::File::options().write(true).open(&path).unwrap();
         f.set_modified(
-            fs::metadata(&path).unwrap().modified().unwrap() + std::time::Duration::from_nanos(1),
+            fs::metadata(&path).unwrap().modified().unwrap() + std::time::Duration::from_secs(1),
         )
         .unwrap();
+        assert_eq!(build(&cache, &out, &opts(true, 1)).unwrap().rendered, 0);
+        let mut data = cache.read(&path).unwrap();
+        data["corrected"] = json!(true);
+        cache.write(&path, &data).unwrap();
         assert_eq!(build(&cache, &out, &opts(true, 1)).unwrap().rendered, 1);
     }
 }

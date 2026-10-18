@@ -5,7 +5,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
-use std::time::UNIX_EPOCH;
 
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
@@ -28,7 +27,7 @@ const RENDER_SOURCES: [&str; 9] = [
     include_str!("frontmatter.rs"),
     include_str!("xmltext.rs"),
     include_str!("py.rs"),
-    include_str!("build.rs"),
+    include_str!("blob.rs"),
     include_str!("lint.rs"),
     include_str!("../assets/rumdl.toml"),
     include_str!("../Cargo.lock"),
@@ -65,12 +64,13 @@ fn canonical(v: &Value) -> String {
     }
 }
 
-/// Changes when the revision's data file is rewritten or its metadata changes.
+/// Changes when the revision's data file or its metadata changes.
 pub fn input_key(cache: &Cache, r: &Revision) -> anyhow::Result<String> {
-    let st = fs::metadata(cache.data_path(r.revision_id()))?;
-    let mtime = st.modified()?.duration_since(UNIX_EPOCH)?.as_nanos();
-    let meta = canonical(&json!([&*r.law_info, &r.rev]));
-    Ok(hex(&Sha1::digest(format!("{} {mtime} {meta}", st.len()))))
+    let mut h = Sha1::new();
+    h.update(fs::read(cache.data_path(r.revision_id()))?);
+    h.update([0]);
+    h.update(canonical(&json!([&*r.law_info, &r.rev])));
+    Ok(hex(&h.finalize()))
 }
 
 /// The entries of the last linted build whose blobs `repo` still has.

@@ -108,8 +108,9 @@ revisions had changed since the crawl.
 
 Reads only the cache and rebuilds the whole history from scratch every time. Rendering
 is reused: `rendered.json` in the cache maps each revision to the blob of the last linted
-build, keyed by the revision's data file and metadata and by a hash of the sources rendering
-depends on (render, fidelity, frontmatter, build, the rumdl config, `Cargo.lock`) and
+build, keyed by a hash of the revision's data file and metadata (content, not mtime, so a
+restored cache keeps them) and by a hash of the sources rendering depends on (blob,
+render, fidelity, frontmatter, lint, the rumdl config, `Cargo.lock`) and
 the rumdl version, so a fetch-only change keeps them. A revision whose key is unchanged takes its blob from the
 previous repository (borrowed through git alternates, then copied in by `git repack -a`)
 and is neither rendered nor linted again. A damaged `rendered.json` only costs a full
