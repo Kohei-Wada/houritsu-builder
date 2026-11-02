@@ -248,9 +248,11 @@ Enforced: 2027-01-17
 - `施行日` adds e-Gov's wording of the day when it has one: `施行日: 未定（政令で定める日）`,
   with `Enforced: undetermined`. Such a commit is dated 2117-12-31 and so is last on
   `upcoming`.
-- An amending Act also gets `Bill: 閣法 第221回国会 第54号` and `Bill-Url:` (the bill's text
-  page on the House of Representatives site), matched by law number through the bill
-  database by smartnews-smri (MIT), cached by `fetch`. Only the link: the bill's 理由
+- An amending Act also gets `Bill: 閣法 第221回国会 第54号`, `Bill-Submitter:` (the database's
+  議案提出者 without the spaces between name parts, e.g. `内閣`, `神谷宗幣君外四名`; omitted
+  when empty) and `Bill-Url:` (the bill's text page on the House of Representatives site),
+  matched by law number through the bill database by smartnews-smri (MIT), cached by
+  `fetch`. Only the submitter and the link: the bill's 理由
   is the House's copyright (use only as the copyright act allows, no modification), so
   tools fetch it on demand. Checked 2026-10-17: 1,416 of 1,639 amending Acts match; the
   database starts around 1998, so older ones do not.

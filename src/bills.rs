@@ -1,7 +1,7 @@
 //! Which Diet bill became an amending Act, from the House of Representatives bill database
 //! compiled by smartnews-smri (MIT): https://github.com/smartnews-smri/house-of-representatives.
-//! Only the bill's number and the URL of its text are used; the text itself is the House's
-//! copyright and stays there.
+//! Only the bill's number, its submitter and the URL of its text are used; the text itself is
+//! the House's copyright and stays there.
 
 use std::collections::HashMap;
 use std::fs;
@@ -28,6 +28,7 @@ pub struct Bill {
     pub kind: String,
     pub session: String,
     pub number: String,
+    pub submitter: String,
     pub url: String,
 }
 
@@ -59,10 +60,11 @@ impl Bills {
                 .position(|h| h == name)
                 .ok_or_else(|| anyhow::anyhow!("no column {name}"))
         };
-        let (kind, session, number, url, law) = (
+        let (kind, session, number, submitter, url, law) = (
             col("議案種類")?,
             col("提出回次")?,
             col("番号")?,
+            col("議案提出者")?,
             col("本文情報URL")?,
             col("公布年月日／法律番号")?,
         );
@@ -84,6 +86,7 @@ impl Bills {
                 kind: text(row, kind),
                 session: text(row, session),
                 number: text(row, number),
+                submitter: text(row, submitter).split_whitespace().collect(),
                 url: text(row, url),
             };
             bills.insert((era(&m[1]), year, m[3].parse()?), bill);
@@ -142,11 +145,11 @@ pub(crate) mod tests {
 
     pub fn sample() -> Bills {
         let json = r#"[
-            ["議案種類", "提出回次", "番号", "本文情報URL", "公布年月日／法律番号"],
-            ["閣法", "221", "54", "https://example/g22109054.htm", "令和 8年 7月17日／56"],
-            ["衆法", "139", "18", "https://example/g13905018.htm", "平成10年 3月25日／7"],
-            ["参法", "201", "3", "https://example/g20103003.htm", "令和元年 6月 1日／1"],
-            ["閣法", "222", "1", "", "／"]
+            ["議案種類", "提出回次", "番号", "議案提出者", "本文情報URL", "公布年月日／法律番号"],
+            ["閣法", "221", "54", "内閣", "https://example/g22109054.htm", "令和 8年 7月17日／56"],
+            ["衆法", "139", "18", " 神谷　宗幣君外四名 ", "https://example/g13905018.htm", "平成10年 3月25日／7"],
+            ["参法", "201", "3", null, "https://example/g20103003.htm", "令和元年 6月 1日／1"],
+            ["閣法", "222", "1", "内閣", "", "／"]
         ]"#;
         Bills::parse(json.as_bytes()).unwrap()
     }
@@ -161,6 +164,17 @@ pub(crate) mod tests {
         );
         assert_eq!(bills.for_law("410AC1000000007").unwrap().kind, "衆法");
         assert_eq!(bills.for_law("501AC1000000001").unwrap().kind, "参法");
+    }
+
+    #[test]
+    fn the_submitter_drops_spaces_between_name_parts() {
+        let bills = sample();
+        assert_eq!(bills.for_law("508AC0000000056").unwrap().submitter, "内閣");
+        assert_eq!(
+            bills.for_law("410AC1000000007").unwrap().submitter,
+            "神谷宗幣君外四名"
+        );
+        assert_eq!(bills.for_law("501AC1000000001").unwrap().submitter, "");
     }
 
     #[test]
