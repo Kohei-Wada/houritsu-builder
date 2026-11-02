@@ -16,8 +16,9 @@ Information Protection Act, and `git show <commit>` is what one amendment change
 - The table of contents (目次) is left out: it only repeats the headings.
 - `main`: enforced revisions. `upcoming`: promulgated but not yet in force.
 - Commit date = enforcement date (00:00 JST). Trailers: `Amendment-Law-Id`, `Enforced`;
-  for an amending Act, also `Bill` (the Diet bill) and `Bill-Url` (its text on the House of
-  Representatives site, where the bill's 理由 is). `Skipped-Revision` names a revision
+  for an amending Act, also `Bill` (the Diet bill), `Bill-Submitter` (who submitted it, e.g.
+  `内閣` or `神谷宗幣君外四名`) and `Bill-Url` (its text on the House of Representatives site,
+  where the bill's 理由 is). `Skipped-Revision` names a revision
   e-Gov has no text for; the commit's diff covers it too.
   git cannot record dates before 1970, so earlier ones are recorded as 1970-01-02; the real
   date is in the `Enforced` trailer and the frontmatter.

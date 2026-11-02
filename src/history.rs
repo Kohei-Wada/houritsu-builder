@@ -158,6 +158,9 @@ impl Group {
                 "Bill: {} 第{}回国会 第{}号",
                 bill.kind, bill.session, bill.number
             ));
+            if !bill.submitter.is_empty() {
+                lines.push(format!("Bill-Submitter: {}", bill.submitter));
+            }
             if !bill.url.is_empty() {
                 lines.push(format!("Bill-Url: {}", bill.url));
             }
@@ -475,8 +478,16 @@ mod tests {
         let (main, _) = plan(vec![r("A", "508AC0000000056", "2027-01-17")]);
         assert!(main[0].message(&crate::bills::tests::sample()).ends_with(
             "Amendment-Law-Id: 508AC0000000056\nEnforced: 2027-01-17\n\
-             Bill: 閣法 第221回国会 第54号\nBill-Url: https://example/g22109054.htm\n"
+             Bill: 閣法 第221回国会 第54号\nBill-Submitter: 内閣\nBill-Url: https://example/g22109054.htm\n"
         ));
+    }
+
+    #[test]
+    fn a_bill_without_a_submitter_has_no_submitter_trailer() {
+        let (main, _) = plan(vec![r("A", "501AC1000000001", "2019-06-01")]);
+        let m = main[0].message(&crate::bills::tests::sample());
+        assert!(m.contains("Bill: 参法 第201回国会 第3号\nBill-Url: "));
+        assert!(!m.contains("Bill-Submitter"));
     }
 
     #[test]
