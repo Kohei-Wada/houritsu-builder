@@ -6,6 +6,7 @@ use std::path::Path;
 use anyhow::Context;
 use base64::Engine;
 use rayon::prelude::*;
+use serde_json::Value;
 
 use crate::cache::Cache;
 use crate::fastimport::write_blob;
@@ -21,6 +22,28 @@ pub struct Rendered {
     pub warnings: Vec<String>,
 }
 
+/// A revision's file: its frontmatter and the rendered text of `law_full_text`, e-Gov's base64 XML.
+pub fn text(
+    law_info: &Value,
+    rev: &Value,
+    law_full_text: &str,
+    revision_id: &str,
+) -> anyhow::Result<(String, Counts)> {
+    let engine = &base64::engine::general_purpose::STANDARD;
+    let bytes = engine
+        .decode(law_full_text)
+        .or_else(|_| engine.decode(law_full_text.split_ascii_whitespace().collect::<String>()))?;
+    let xml = std::str::from_utf8(&bytes)?;
+    let xml = xml.strip_prefix('\u{feff}').unwrap_or(xml);
+    let doc = parse(xml).with_context(|| revision_id.to_string())?;
+    let rendered = render_doc(&doc, Some(revision_id)).with_context(|| revision_id.to_string())?;
+    check_doc(&doc, &rendered.markdown, revision_id)?;
+    Ok((
+        frontmatter(law_info, rev) + &rendered.markdown,
+        rendered.unknown,
+    ))
+}
+
 fn render(
     cache: &Cache,
     objects: &Path,
@@ -34,18 +57,12 @@ fn render(
     }
     let raw = cache.read_raw(&cache.data_path(r.revision_id()))?;
     let data: Data = serde_json::from_slice(&raw).with_context(|| r.revision_id().to_string())?;
-    let b64 = data.law_full_text.as_deref().unwrap_or_default();
-    let engine = &base64::engine::general_purpose::STANDARD;
-    let bytes = engine
-        .decode(b64)
-        .or_else(|_| engine.decode(b64.split_ascii_whitespace().collect::<String>()))?;
-    let xml = std::str::from_utf8(&bytes)?;
-    let xml = xml.strip_prefix('\u{feff}').unwrap_or(xml);
-    let doc = parse(xml).with_context(|| r.revision_id().to_string())?;
-    let rendered =
-        render_doc(&doc, Some(r.revision_id())).with_context(|| r.revision_id().to_string())?;
-    check_doc(&doc, &rendered.markdown, r.revision_id())?;
-    let text = frontmatter(&r.law_info, &r.rev) + &rendered.markdown;
+    let (text, unknown) = text(
+        &r.law_info,
+        &r.rev,
+        data.law_full_text.as_deref().unwrap_or_default(),
+        r.revision_id(),
+    )?;
     let warnings = match linter {
         Some(l) => l.check(
             &format!(
@@ -59,7 +76,7 @@ fn render(
     };
     Ok(Rendered {
         sha: write_blob(objects, text.as_bytes())?,
-        unknown: rendered.unknown,
+        unknown,
         warnings,
     })
 }

@@ -13,6 +13,7 @@ pub mod lint;
 pub mod py;
 pub mod render;
 pub mod reuse;
+pub mod verify;
 pub mod xmltext;
 
 #[cfg(test)]

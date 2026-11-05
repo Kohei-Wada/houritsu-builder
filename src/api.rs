@@ -5,6 +5,8 @@ use serde_json::Value;
 
 pub const BASE: &str = "https://laws.e-gov.go.jp/api/2";
 const BACKOFF: f64 = 2.0;
+/// Seconds between requests of one worker.
+pub const DELAY: f64 = 0.1;
 pub const USER_AGENT: &str = concat!(
     "houritsu-builder/",
     env!("CARGO_PKG_VERSION"),

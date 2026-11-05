@@ -5,11 +5,12 @@ use clap::{Parser, Subcommand};
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use houritsu_builder::api::Client;
+use houritsu_builder::api::{Client, DELAY};
 use houritsu_builder::bills;
 use houritsu_builder::build::{self, build};
 use houritsu_builder::cache::Cache;
 use houritsu_builder::fetch::{self, fetch};
+use houritsu_builder::verify::{self, Verdict};
 
 #[derive(Parser)]
 #[command(
@@ -41,7 +42,7 @@ enum Cmd {
         #[arg(long)]
         limit: Option<usize>,
         /// Seconds between requests of one worker
-        #[arg(long, default_value_t = 0.1)]
+        #[arg(long, default_value_t = DELAY)]
         delay: f64,
         /// Laws fetched at the same time
         #[arg(long, default_value_t = 2)]
@@ -63,6 +64,17 @@ enum Cmd {
         /// Skip rumdl
         #[arg(long)]
         no_lint: bool,
+    },
+    /// Check a law file of a houritsu checkout against what e-Gov serves now
+    Verify {
+        /// A law file, or a law ID to look up in --repo
+        target: String,
+        /// The houritsu checkout to look a law ID up in
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        /// Check this revision from the history of HEAD instead of the file as it is
+        #[arg(long)]
+        revision: Option<String>,
     },
 }
 
@@ -113,6 +125,28 @@ fn main() -> anyhow::Result<()> {
                 "unknown elements: {}",
                 serde_json::to_string(&report.to_json(true)["unknown"])?
             );
+        }
+        Cmd::Verify {
+            target,
+            repo,
+            revision,
+        } => {
+            let result = verify::locate(&repo, &target, revision.as_deref())
+                .and_then(|local| Ok((verify::check(&Client::new(DELAY), &local)?, local)));
+            match result {
+                Ok((Verdict::Match, local)) => println!("OK {}", local.path),
+                Ok((Verdict::Mismatch { reason, diff }, local)) => {
+                    println!("MISMATCH {}: {reason}", local.path);
+                    if !diff.is_empty() {
+                        println!("{diff}");
+                    }
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("error: {e:#}");
+                    std::process::exit(2);
+                }
+            }
         }
     }
     Ok(())

@@ -11,6 +11,10 @@ use crate::py::is_truthy;
 
 const FUTURE: &str = "2099-12-31"; // asof this date, a law's revision_info is its newest revision, enforced or not
 
+/// The query `law_data/{revision_id}` is fetched with.
+pub const LAW_DATA_PARAMS: &[(&str, &str)] =
+    &[("law_full_text_format", "xml"), ("response_format", "json")];
+
 const PAGES_AT_ONCE: usize = 4; // a page takes 1.5–3 s; four at once took 2.2 s on 2026-10-17
 
 fn law_page(client: &dyn Api, offset: usize, params: &[(&str, &str)]) -> Result<Value, ApiError> {
@@ -78,8 +82,13 @@ pub fn today_jst() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_secs() as i64
-        + 9 * 3600;
+        .as_secs() as i64;
+    jst(secs)[..10].to_string()
+}
+
+/// A Unix time as e-Gov writes its `updated` times, e.g. 2026-11-02T15:12:30+09:00.
+pub fn jst(unix: i64) -> String {
+    let secs = unix + 9 * 3600;
     let z = secs.div_euclid(86400) + 719468;
     let era = z.div_euclid(146097);
     let doe = z - era * 146097;
@@ -89,7 +98,13 @@ pub fn today_jst() -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}")
+    let s = secs.rem_euclid(86400);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}+09:00",
+        s / 3600,
+        s / 60 % 60,
+        s % 60
+    )
 }
 
 fn revisions_of(doc: &Value) -> &[Value] {
@@ -293,10 +308,10 @@ impl Run<'_> {
             if path.exists() && updated.get(rid).is_none_or(|u| *u == rev["updated"]) {
                 continue;
             }
-            match self.client.get_json(
-                &format!("law_data/{rid}"),
-                &[("law_full_text_format", "xml"), ("response_format", "json")],
-            ) {
+            match self
+                .client
+                .get_json(&format!("law_data/{rid}"), LAW_DATA_PARAMS)
+            {
                 Ok(data) => {
                     self.cache.write(&path, &data)?;
                     self.count("fetched", 1);
@@ -390,6 +405,13 @@ mod tests {
     struct Fake {
         routes: HashMap<String, Route>,
         calls: Mutex<Vec<String>>,
+    }
+
+    #[test]
+    fn writes_times_as_e_gov_does() {
+        assert_eq!(jst(1793819211), "2026-11-05T04:06:51+09:00");
+        assert_eq!(jst(-1), "1970-01-01T08:59:59+09:00");
+        assert_eq!(today_jst().len(), 10);
     }
 
     impl Fake {
