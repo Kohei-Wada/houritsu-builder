@@ -19,10 +19,8 @@ rumdl = { version = "=0.2.79", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha1 = "0.10"
-ureq = "2"
-
-[dev-dependencies]
 tempfile = "3"
+ureq = "2"
 
 [profile.release]
 lto = true
