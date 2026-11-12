@@ -1,6 +1,37 @@
-The contents of this repository are licensed under the Creative Commons Attribution 4.0
-International License (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/legalcode
+houritsu: licence, credit and source
 
-Source: e-Gov法令検索 (https://laws.e-gov.go.jp/), under the Public Data License 1.0
-(https://www.digital.go.jp/resources/open_data/public_data_license_v1.0), whose §1.7
-permits use under CC BY 4.0. Edited into markdown by houritsu-builder (Kohei-Wada).
+What is not copyrighted
+
+The statute text in this repository is not copyrighted (Copyright Act of Japan, Article
+13; 著作権法第13条), and neither is its mechanical conversion to markdown. You may use
+them without permission. The licence below adds no restriction on using them.
+
+Licence
+
+Whatever in this repository the author (Kohei-Wada) holds copyright or other licensable
+rights in is licensed under the Creative Commons Attribution 4.0 International License
+(CC BY 4.0): https://creativecommons.org/licenses/by/4.0/legalcode
+The licence applies to nothing else.
+
+Credit
+
+If you reuse the data, a credit to houritsu (https://github.com/Kohei-Wada/houritsu) is
+appreciated. Where no licence is needed, this is a request, not a requirement.
+
+Source
+
+This section states where the data comes from and what was changed. It is separate from
+the licence terms above.
+
+Source: e-Gov法令検索 (https://laws.e-gov.go.jp/), Public Data License 1.0
+(https://www.digital.go.jp/resources/open_data/public_data_license_v1.0). Edited into
+markdown by houritsu-builder (Kohei-Wada): the characters of the statute text are
+unchanged; headings, markdown escapes and figure links are added. Bill numbers and links
+to bill pages come from the bill database by smartnews-smri
+(https://github.com/smartnews-smri/house-of-representatives, MIT).
+
+No warranty
+
+This is not legal advice, and the text may be out of date or wrong. It is not the
+official text; the official text is the 官報. Check e-Gov or the 官報 before relying on
+it.

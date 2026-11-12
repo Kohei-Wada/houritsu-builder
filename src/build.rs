@@ -20,6 +20,7 @@ use crate::reuse::{self, Entries, Entry};
 
 const MARKER: &str = ".git/houritsu-build";
 const README: &str = include_str!("../assets/README.md");
+const README_JA: &str = include_str!("../assets/README.ja.md");
 const LICENSE: &str = include_str!("../assets/LICENSE");
 // git's built-in markdown diff driver names the enclosing heading (the article) in hunk headers.
 const GITATTRIBUTES: &str = "*.md diff=markdown\n";
@@ -185,6 +186,7 @@ fn stream(
             message: "リポジトリの初期化\n",
             files: BTreeMap::from([
                 ("README.md".to_string(), README.to_string()),
+                ("README.ja.md".to_string(), README_JA.to_string()),
                 ("LICENSE".to_string(), LICENSE.to_string()),
                 (".rumdl.toml".to_string(), lint::CONFIG.to_string()),
                 (".gitattributes".to_string(), GITATTRIBUTES.to_string()),
@@ -410,6 +412,15 @@ mod tests {
         assert_eq!(
             sh(&out, &["show", "main:.gitattributes"]),
             "*.md diff=markdown\n"
+        );
+        let root = sh(&out, &["rev-list", "--max-parents=0", "main"]);
+        assert_eq!(
+            sh(&out, &["ls-tree", "--name-only", root.trim()]),
+            ".gitattributes\n.rumdl.toml\nLICENSE\nREADME.ja.md\nREADME.md\n"
+        );
+        assert_eq!(
+            sh(&out, &["show", &format!("{}:README.ja.md", root.trim())]),
+            README_JA
         );
     }
 
