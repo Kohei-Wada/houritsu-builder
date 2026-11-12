@@ -297,7 +297,18 @@ before or after v1.0. Every build rebuilds the whole history and force-pushes it
   enforcement date); a renderer fix changes the files. One change rewrites every SHA
   after it, so SHA permalinks on GitHub can break.
 - What stays the same across rebuilds is the file path (the law ID), the enforcement date
-  and the amending law's number. The README tells readers to refer to a law by these.
+  and the amending law's number, except on `upcoming`, where an undetermined or estimated
+  enforcement date changes when it is fixed. The README tells readers to refer to a law by
+  these.
+- The key to store is the frontmatter's `revision_id`: e-Gov's `law_revision_id`, copied
+  as is. It holds the same three parts in one field,
+  `<law ID>_<enforcement date as YYYYMMDD>_<amending law ID>`. The builder does not build
+  or check that shape. Measured on the cache on 2026-11-13: all 54,197 revisions have it,
+  with no duplicates, and the law ID and the date always equal the revision's `law_id` and
+  `amendment_enforcement_date` (2117-12-30 or 2117-12-31 while the day is undetermined,
+  where the frontmatter says `undetermined`). The third part equals `amendment_law_id` in
+  51,068 revisions and is `000000000000000` in 3,129, where `amendment_law_id` is null,
+  empty or the same zeros (a version with no amending law).
 - README, README.ja.md and LICENSE stay in the root commit, not in a commit of their own
   at HEAD. Changing one of them changes every SHA.
 

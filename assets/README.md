@@ -51,9 +51,13 @@ Information Protection Act, and `git show <commit>` is what one amendment change
   middle of the history (commits are ordered by enforcement date), or when a fix to the
   renderer changes the files. One change rewrites every SHA after it, so a SHA permalink on
   GitHub can break. Refer to a law by its file path (the law ID), the enforcement date and
-  the amending law's number instead. These stay the same across rebuilds, and are in each
-  commit message (`施行日`, `改正法令`) and in the frontmatter (`amendment.enforced`,
-  `amendment.law_num`).
+  the amending law's number instead. These stay the same across rebuilds, except on
+  `upcoming`, where an undetermined or estimated enforcement date changes when it is fixed.
+  They are in each commit message (`施行日`, `改正法令`) and in the frontmatter
+  (`amendment.enforced`, `amendment.law_num`). The frontmatter's `revision_id` is e-Gov's
+  ID for the revision and holds the same three parts in one field:
+  `<law ID>_<enforcement date>_<amending law ID>`, with zeros where e-Gov's ID names no
+  amending law. It is the key to store.
 
 ## Finding a law
 
