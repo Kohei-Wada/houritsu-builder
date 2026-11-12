@@ -156,6 +156,8 @@ laws/
   ministerial-ordinance/…
   constitution/  rule/  …
 README.md
+README.ja.md     # the same in Japanese
+LICENSE
 .rumdl.toml
 .gitattributes   # *.md diff=markdown: hunk headers name the enclosing article
 ```
@@ -285,11 +287,30 @@ Each check runs in tests and on every build; any failure fails the build.
   supplementary provisions) compared against expected markdown.
 - The quality checks above, run on the fixtures.
 
-## Changing the format
+## Rebuilds and stability
 
-- Until v1.0, history may be rebuilt from the cache and force-pushed. The README says so.
-- From v1.0, history is never rewritten; corrections land as a new commit at HEAD,
-  dated the day of the correction.
+Decided 2026-11-13: houritsu is a build artifact of e-Gov data and is never append-only,
+before or after v1.0. Every build rebuilds the whole history and force-pushes it.
+
+- Commit SHAs are not stable. Three things change them: e-Gov corrects a past revision;
+  data arrives late and lands in the middle of the history (commits are ordered by
+  enforcement date); a renderer fix changes the files. One change rewrites every SHA
+  after it, so SHA permalinks on GitHub can break.
+- What stays the same across rebuilds is the file path (the law ID), the enforcement date
+  and the amending law's number, except on `upcoming`, where an undetermined or estimated
+  enforcement date changes when it is fixed. The README tells readers to refer to a law by
+  these.
+- The key to store is the frontmatter's `revision_id`: e-Gov's `law_revision_id`, copied
+  as is. It holds the same three parts in one field,
+  `<law ID>_<enforcement date as YYYYMMDD>_<amending law ID>`. The builder does not build
+  or check that shape. Measured on the cache on 2026-11-13: all 54,197 revisions have it,
+  with no duplicates, and the law ID and the date always equal the revision's `law_id` and
+  `amendment_enforcement_date` (2117-12-30 or 2117-12-31 while the day is undetermined,
+  where the frontmatter says `undetermined`). The third part equals `amendment_law_id` in
+  51,068 revisions and is `000000000000000` in 3,129, where `amendment_law_id` is null,
+  empty or the same zeros (a version with no amending law).
+- README, README.ja.md and LICENSE stay in the root commit, not in a commit of their own
+  at HEAD. Changing one of them changes every SHA.
 
 ## Operations
 
@@ -312,6 +333,10 @@ Each check runs in tests and on every build; any failure fails the build.
    disclaimer. PDL1.0 is a site's terms, not a license for others to apply, so houritsu
    is offered under CC BY 4.0, which §1.7 allows (issue #9), with a LICENSE and a
    no-warranty note; the builder is MIT. Statute text itself is not copyrighted (著作権法第13条).
+   Scope narrowed 2026-11-13 (houritsu issue #1): the statute text and its mechanical
+   conversion are free to use, CC BY 4.0 covers only what the author holds licensable
+   rights in (the LICENSE takes no position on whether anything is), the source line is
+   kept apart from the licence terms, and credit is a request.
 
 ## Open questions
 

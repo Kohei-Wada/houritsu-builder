@@ -38,4 +38,4 @@ e-Gov's version (exit 1). Errors exit 2. The reason is one of:
 
 ## License
 
-MIT. The houritsu data it builds is CC BY 4.0; see its README.
+MIT. For the houritsu data it builds, see the License section of its README.

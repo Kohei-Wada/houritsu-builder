@@ -1,10 +1,14 @@
 # houritsu
 
+[日本語](README.ja.md)
+
 Every Japanese law (法令) as git history. One commit is one amending law coming into
 force: `git log laws/act/415/415AC0000000057.md` is the amendment history of the Personal
 Information Protection Act, and `git show <commit>` is what one amendment changed.
 
-> **Before v1.0, history may be rebuilt and force-pushed.**
+> **Commit SHAs are not stable.** The history is rebuilt from e-Gov's data and
+> force-pushed. Refer to a law by path, enforcement date and amending law number; see
+> [Limits](#limits).
 
 ## Layout
 
@@ -41,10 +45,19 @@ Information Protection Act, and `git show <commit>` is what one amendment change
 - **A law enters at its oldest e-Gov revision.** Checking out an old date shows no file for
   a law e-Gov covers only later, not its older text: about 2,800 laws at 2010-01-01 against
   9,000 now.
-- **Commit SHAs are not stable before v1.0.** A rebuild keeps them only while the data
-  and the builder are unchanged; a builder change, or e-Gov adding a revision dated before
-  existing commits, rewrites every later SHA. Refer to a revision by its `law_id` and
-  `revision_id` (both in the frontmatter) instead.
+- **Commit SHAs are not stable, and will not become stable.** houritsu is built from
+  e-Gov's data; it is not an append-only log. Every build rebuilds the whole history, and
+  SHAs change when e-Gov corrects a past revision, when data arrives late and lands in the
+  middle of the history (commits are ordered by enforcement date), or when a fix to the
+  renderer changes the files. One change rewrites every SHA after it, so a SHA permalink on
+  GitHub can break. Refer to a law by its file path (the law ID), the enforcement date and
+  the amending law's number instead. These stay the same across rebuilds, except on
+  `upcoming`, where an undetermined or estimated enforcement date changes when it is fixed.
+  They are in each commit message (`施行日`, `改正法令`) and in the frontmatter
+  (`amendment.enforced`, `amendment.law_num`). The frontmatter's `revision_id` is e-Gov's
+  ID for the revision and holds the same three parts in one field:
+  `<law ID>_<enforcement date>_<amending law ID>`, with zeros where e-Gov's ID names no
+  amending law. It is the key to store.
 
 ## Finding a law
 
@@ -68,7 +81,10 @@ that 附則's heading, which names its amending law: `/^## 附　則（令和二
 
 ## 出典 / Source
 
-出典：e-Gov法令検索（https://laws.e-gov.go.jp/）、PDL1.0（https://www.digital.go.jp/resources/open_data/public_data_license_v1.0）
+This section states where the data comes from and what was changed. It is separate from
+the licence terms in the next section.
+
+出典：e-Gov法令検索（<https://laws.e-gov.go.jp/>）、PDL1.0（<https://www.digital.go.jp/resources/open_data/public_data_license_v1.0>）
 
 e-Gov法令検索の法令データ（法令API v2）を [houritsu-builder](https://github.com/Kohei-Wada/houritsu-builder)（Kohei-Wada）が markdown に加工して作成。
 条文の文字は変更していない（markdown のための見出し記号とエスケープ、図へのリンクを加えた）。正本は官報。改正履歴は e-Gov が提供する範囲に限る。
@@ -81,9 +97,16 @@ history is limited to what e-Gov provides.
 
 ## License
 
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), which PDL1.0 §1.7 allows for
-the source data. Attribute as in the section above. The statute text itself is not
-copyrighted (著作権法第13条).
+The statute text is not copyrighted (著作権法第13条), and neither is its mechanical
+conversion to markdown. You may use them without permission; CC BY 4.0 adds no
+restriction on using them.
+
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) applies only to whatever in this
+repository the author holds copyright or other licensable rights in. It applies to
+nothing else.
+
+If you reuse the data, a credit to houritsu (<https://github.com/Kohei-Wada/houritsu>) is
+appreciated. Where no licence is needed, this is a request, not a requirement.
 
 No warranty: this is not legal advice, and the text may be out of date or wrong. Check
 e-Gov or the 官報 before relying on it.
