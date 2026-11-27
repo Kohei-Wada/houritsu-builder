@@ -55,18 +55,22 @@ impl Revision {
         as_str(self.rev.get("amendment_promulgate_date"))
     }
 
-    pub fn upcoming(&self) -> bool {
-        self.rev
-            .get("current_revision_status")
-            .and_then(Value::as_str)
-            == Some("UnEnforced")
+    /// Not in force on `today`. By date, as e-Gov picks a law's current revision: its status
+    /// can stay `UnEnforced` long after the date (every revision of some repealed laws).
+    pub fn upcoming(&self, today: &str) -> bool {
+        match self.enforced().filter(|d| !d.is_empty()) {
+            Some(d) => d > today,
+            None => self.status() == Some("UnEnforced"),
+        }
     }
 
     pub fn repealed(&self) -> bool {
-        self.rev
-            .get("current_revision_status")
-            .and_then(Value::as_str)
-            == Some("Repeal")
+        self.status() == Some("Repeal")
+            || as_str(self.rev.get("repeal_status")).is_some_and(|s| !s.is_empty() && s != "None")
+    }
+
+    fn status(&self) -> Option<&str> {
+        as_str(self.rev.get("current_revision_status"))
     }
 
     pub fn path(&self) -> String {
@@ -83,8 +87,8 @@ pub struct Group {
 }
 
 impl Group {
-    pub fn upcoming(&self) -> bool {
-        self.revisions.iter().any(Revision::upcoming)
+    pub fn upcoming(&self, today: &str) -> bool {
+        self.revisions.iter().any(|r| r.upcoming(today))
     }
 
     pub fn commit_date(&self) -> String {
@@ -236,18 +240,20 @@ pub fn load_revisions(cache: &Cache, law_type: Option<&str>) -> anyhow::Result<L
     Ok(loaded)
 }
 
-/// The order in which a law's revisions took effect.
-fn order(r: &Revision) -> (String, String) {
+/// The order in which a law's revisions took effect: on one day, the later promulgated amends
+/// the text as the earlier left it, and e-Gov's current revision is the last promulgated.
+fn order(r: &Revision) -> (String, String, String) {
     (
         or_str(r.enforced(), or_str(r.promulgated(), "")).to_string(),
+        or_str(r.promulgated(), "").to_string(),
         r.amendment_law_id().to_string(),
     )
 }
 
 fn drop_redundant_repeals(mut revisions: Vec<Revision>) -> Vec<Revision> {
     revisions.sort_by_cached_key(order);
-    // A repeal is final: a later revision, even one dated the same day under a higher
-    // amending-law ID (e-Gov lists that one as enforced just before the repeal), is dropped.
+    // A repeal is final: a later revision, even one dated the same day and ordered after it
+    // (e-Gov lists that one as enforced just before the repeal), is dropped.
     let (mut alive, mut repealed) = (HashSet::new(), HashSet::new());
     let mut kept = vec![];
     for r in revisions {
@@ -267,7 +273,7 @@ fn drop_redundant_repeals(mut revisions: Vec<Revision>) -> Vec<Revision> {
     kept
 }
 
-pub fn plan(revisions: Vec<Revision>) -> (Vec<Group>, Vec<Group>) {
+pub fn plan(revisions: Vec<Revision>, today: &str) -> (Vec<Group>, Vec<Group>) {
     let mut groups: Vec<Group> = vec![];
     let mut index: HashMap<(Option<String>, String), usize> = HashMap::new();
     for r in drop_redundant_repeals(revisions) {
@@ -288,8 +294,14 @@ pub fn plan(revisions: Vec<Revision>) -> (Vec<Group>, Vec<Group>) {
     for g in &mut groups {
         g.revisions.sort_by_cached_key(Revision::path);
     }
-    groups.sort_by_cached_key(|g| (g.commit_date(), g.amendment_law_id.clone()));
-    groups.into_iter().partition(|g| !g.upcoming())
+    groups.sort_by_cached_key(|g| {
+        (
+            g.commit_date(),
+            or_str(g.revisions[0].promulgated(), "").to_string(),
+            g.amendment_law_id.clone(),
+        )
+    });
+    groups.into_iter().partition(|g| !g.upcoming(today))
 }
 
 #[cfg(test)]
@@ -344,6 +356,12 @@ mod tests {
         )
     }
 
+    const TODAY: &str = "2099-01-01";
+
+    fn planned(revisions: Vec<Revision>) -> (Vec<Group>, Vec<Group>) {
+        plan(revisions, TODAY)
+    }
+
     fn ids(groups: &[Group]) -> Vec<(&str, Vec<&str>)> {
         groups
             .iter()
@@ -379,7 +397,7 @@ mod tests {
 
     #[test]
     fn one_amending_law_changing_two_laws_is_one_commit() {
-        let (main, upcoming) = plan(vec![
+        let (main, upcoming) = planned(vec![
             r("B", "Z", "2021-04-01"),
             r("A", "Z", "2021-04-01"),
             r("A", "Y", "2020-04-01"),
@@ -390,7 +408,7 @@ mod tests {
 
     #[test]
     fn same_day_revisions_are_ordered_by_amendment_id() {
-        let (main, _) = plan(vec![r("A", "Q2", "2026-07-17"), r("A", "Q1", "2026-07-17")]);
+        let (main, _) = planned(vec![r("A", "Q2", "2026-07-17"), r("A", "Q1", "2026-07-17")]);
         assert_eq!(
             main.iter()
                 .map(|g| g.amendment_law_id.as_str())
@@ -400,8 +418,91 @@ mod tests {
     }
 
     #[test]
+    fn same_day_revisions_are_ordered_by_promulgation_first() {
+        let (main, _) = planned(vec![
+            rev(
+                "A",
+                "Q1",
+                Some("2026-01-01"),
+                "2025-05-23",
+                "CurrentEnforced",
+                "法",
+            ),
+            rev(
+                "A",
+                "Q2",
+                Some("2026-01-01"),
+                "2025-01-08",
+                "PreviousEnforced",
+                "法",
+            ),
+        ]);
+        assert_eq!(
+            main.iter()
+                .map(|g| g.amendment_law_id.as_str())
+                .collect::<Vec<_>>(),
+            ["Q2", "Q1"]
+        );
+    }
+
+    #[test]
+    fn a_due_revision_goes_on_main_whatever_its_status() {
+        // e-Gov keeps every revision of some repealed laws UnEnforced (501M60000100044).
+        let stuck = rev(
+            "B",
+            "Z",
+            Some("2026-10-01"),
+            "2026-09-30",
+            "UnEnforced",
+            "乙法",
+        );
+        let (main, upcoming) = plan(
+            vec![
+                r("A", "Y", "2026-04-01"),
+                rev(
+                    "A",
+                    "Z",
+                    Some("2026-10-01"),
+                    "2026-09-30",
+                    "CurrentEnforced",
+                    "法",
+                ),
+                stuck.clone(),
+                rev(
+                    "A",
+                    "X",
+                    Some("2026-11-28"),
+                    "2026-09-30",
+                    "UnEnforced",
+                    "法",
+                ),
+            ],
+            "2026-11-27",
+        );
+        assert_eq!(ids(&main), [("Y", vec!["A"]), ("Z", vec!["A", "B"])]);
+        assert_eq!(ids(&upcoming), [("X", vec!["A"])]);
+        assert_eq!(plan(vec![stuck], "2026-10-01").0.len(), 1);
+    }
+
+    #[test]
+    fn a_revision_e_gov_marks_as_a_repeal_is_one() {
+        let mut gone = rev(
+            "A",
+            "Z",
+            Some("2026-10-01"),
+            "2026-09-30",
+            "UnEnforced",
+            "法",
+        );
+        gone.rev["repeal_status"] = json!("Repeal");
+        let (main, _) = planned(vec![r("A", "Y", "2026-04-01"), gone]);
+        assert!(main[1].revisions[0].repealed());
+        assert!(!r("A", "Y", "2026-04-01").repealed());
+    }
+
+    #[test]
     fn unknown_enforcement_date_goes_upcoming() {
-        let (main, upcoming) = plan(vec![
+        let (main, upcoming) = planned(vec![
             r("A", "Y", "2020-04-01"),
             rev("A", "Z", None, "2026-06-01", "UnEnforced", "法"),
         ]);
@@ -428,7 +529,7 @@ mod tests {
             "法",
         );
         r.rev["amendment_enforcement_comment"] = json!("政令で定める日");
-        let (_, upcoming) = plan(vec![r]);
+        let (_, upcoming) = planned(vec![r]);
         let m = upcoming[0].message(&Bills::default());
         assert!(m.contains("施行日: 未定（政令で定める日）\n"), "{m}");
         assert!(m.ends_with("Enforced: undetermined\n"), "{m}");
@@ -436,19 +537,22 @@ mod tests {
 
     #[test]
     fn author_is_the_amending_law_number() {
-        assert_eq!(plan(vec![r("A", "Z", "2021-04-01")]).0[0].author(), "Z号");
+        assert_eq!(
+            planned(vec![r("A", "Z", "2021-04-01")]).0[0].author(),
+            "Z号"
+        );
         let first = revision(
             "A",
             "平成元年法律第一号",
             "Act",
             json!({"law_revision_id": "A_x", "amendment_enforcement_date": "2020-01-01"}),
         );
-        assert_eq!(plan(vec![first]).0[0].author(), "平成元年法律第一号");
+        assert_eq!(planned(vec![first]).0[0].author(), "平成元年法律第一号");
     }
 
     #[test]
     fn message_format() {
-        let (main, _) = plan(vec![
+        let (main, _) = planned(vec![
             rev(
                 "B",
                 "Z",
@@ -475,7 +579,7 @@ mod tests {
 
     #[test]
     fn an_amending_act_names_its_bill() {
-        let (main, _) = plan(vec![r("A", "508AC0000000056", "2027-01-17")]);
+        let (main, _) = planned(vec![r("A", "508AC0000000056", "2027-01-17")]);
         assert!(main[0].message(&crate::bills::tests::sample()).ends_with(
             "Amendment-Law-Id: 508AC0000000056\nEnforced: 2027-01-17\n\
              Bill: 閣法 第221回国会 第54号\nBill-Submitter: 内閣\nBill-Url: https://example/g22109054.htm\n"
@@ -484,7 +588,7 @@ mod tests {
 
     #[test]
     fn a_bill_without_a_submitter_has_no_submitter_trailer() {
-        let (main, _) = plan(vec![r("A", "501AC1000000001", "2019-06-01")]);
+        let (main, _) = planned(vec![r("A", "501AC1000000001", "2019-06-01")]);
         let m = main[0].message(&crate::bills::tests::sample());
         assert!(m.contains("Bill: 参法 第201回国会 第3号\nBill-Url: "));
         assert!(!m.contains("Bill-Submitter"));
@@ -492,7 +596,7 @@ mod tests {
 
     #[test]
     fn repeal_is_kept_once_and_marked_in_message() {
-        let (main, _) = plan(vec![
+        let (main, _) = planned(vec![
             r("A", "Y", "2020-04-01"),
             rev("A", "Z", Some("2021-04-01"), "2020-01-01", "Repeal", "法"),
             rev("A", "W", Some("2022-04-01"), "2020-01-01", "Repeal", "法"),
@@ -531,7 +635,7 @@ mod tests {
 
     #[test]
     fn a_same_day_revision_does_not_bring_a_repealed_law_back() {
-        let (main, _) = plan(vec![
+        let (main, _) = planned(vec![
             r("A", "Y", "2020-04-01"),
             rev("A", "Z1", Some("2026-04-01"), "2020-01-01", "Repeal", "法"),
             r("A", "Z2", "2026-04-01"),
@@ -546,7 +650,7 @@ mod tests {
 
     #[test]
     fn repeal_of_law_never_seen_is_dropped() {
-        assert!(plan(vec![rev(
+        assert!(planned(vec![rev(
             "A",
             "Z",
             Some("2021-04-01"),
@@ -577,7 +681,7 @@ mod tests {
         let (_d, cache) = fixture_cache();
         let l = load_revisions(&cache, Some("Act")).unwrap();
         assert!(l.revisions.len() == 3 && l.excluded.is_empty() && l.skipped.is_empty());
-        let (main, upcoming) = plan(l.revisions);
+        let (main, upcoming) = planned(l.revisions);
         assert_eq!(
             main.iter().map(Group::commit_date).collect::<Vec<_>>(),
             ["2016-01-01", "2019-05-01", "2020-01-01"]
@@ -629,7 +733,7 @@ mod tests {
         );
         assert!(l.skipped == ["A_2_X"] && l.excluded.is_empty());
         assert!(l.revisions[0].skipped.is_empty() && l.revisions[1].skipped == ["A_2_X"]);
-        let (main, _) = plan(l.revisions);
+        let (main, _) = planned(l.revisions);
         assert!(main[1]
             .message(&Bills::default())
             .ends_with("Skipped-Revision: A_2_X\n"));

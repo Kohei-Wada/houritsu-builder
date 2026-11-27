@@ -119,7 +119,6 @@ fn stale(
     law_id: &str,
     newest: [Option<&Value>; 2],
     today: &str,
-    not_found: &HashSet<String>,
 ) -> anyhow::Result<bool> {
     let path = cache.revisions_path(law_id);
     if !path.exists() {
@@ -133,11 +132,9 @@ fn stale(
             .unwrap_or_default()
             .to_string()
     };
-    if revisions
-        .iter()
-        .any(|r| !not_found.contains(&rid(r)) && !cache.data_path(&rid(r)).exists())
-    {
-        return Ok(true); // a full text failed last time
+    if revisions.iter().any(|r| !cache.data_path(&rid(r)).exists()) {
+        // a full text failed last time; a 404 too: e-Gov lists a revision before it serves its text
+        return Ok(true);
     }
     let seen: HashSet<(String, String)> = revisions
         .iter()
@@ -226,16 +223,10 @@ fn select(
             .iter()
             .map(|l| (law_id(l), l["revision_info"].clone()))
             .collect();
-        let (today, not_found) = (today_jst(), cache.not_found()?);
+        let today = today_jst();
         let mut kept = vec![];
         for id in targets {
-            if stale(
-                cache,
-                &id,
-                [current.get(&id), future.get(&id)],
-                &today,
-                &not_found,
-            )? {
+            if stale(cache, &id, [current.get(&id), future.get(&id)], &today)? {
                 kept.push(id);
             }
         }
@@ -803,14 +794,12 @@ mod tests {
             listed("GONE", "GONE_1", "u1"),
         ];
         let mut routes: Vec<(&str, Route)> = vec![("laws", law_lists(now, future, HashMap::new()))];
-        let paths: Vec<String> = ["NEWER", "EDITED", "DUE", "NEW", "FAILED"]
+        let refetched = ["NEWER", "EDITED", "DUE", "NEW", "FAILED", "GONE"];
+        let paths: Vec<String> = refetched
             .iter()
             .map(|id| format!("law_revisions/{id}"))
             .collect();
-        for (p, id) in paths
-            .iter()
-            .zip(["NEWER", "EDITED", "DUE", "NEW", "FAILED"])
-        {
+        for (p, id) in paths.iter().zip(refetched) {
             routes.push((p.as_str(), fixed(doc(id, vec![]))));
         }
         let fake = Fake::new(routes);
@@ -823,6 +812,7 @@ mod tests {
                 "law_revisions/DUE",
                 "law_revisions/EDITED",
                 "law_revisions/FAILED",
+                "law_revisions/GONE",
                 "law_revisions/NEW",
                 "law_revisions/NEWER"
             ]
