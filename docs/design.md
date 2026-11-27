@@ -93,8 +93,9 @@ the builder's URL.
 
 A run refetches a law's revision list only when it may have changed: the law is new,
 the newest revision as of now or as of 2099-12-31 (`/laws?asof=`) is not in the cached
-list with the same `updated`, a cached `UnEnforced` revision is due, or a full text
-failed last time (other than with 404). A new amending
+list with the same `updated`, a cached `UnEnforced` revision is due, or a full text is
+missing. A 404 counts: e-Gov can list a revision days before it serves its text (22
+revisions enforced 2026-11-11..24 answered 404 on 2026-11-25..27, then 200). A new amending
 law found in a refetched list is looked up with `/laws?amendment_law_id=`, which lists
 every law it amends, so a revision inserted mid-history is not missed. A run with
 `--full` refetches every list and catches anything these checks miss; run it weekly.
@@ -125,25 +126,34 @@ revision e-Gov answers with 404 is skipped: the next revision of that law names 
 
 1. Group revisions by amending law and enforcement date. One group is one commit:
    "this amending law came into force on this date and changed these files".
-2. Order groups by enforcement date, then by amending law ID, so the order is total
-   and stable.
+2. Order groups by enforcement date, then by promulgation date, then by amending law ID,
+   so the order is total and stable. On one day the later promulgated amending law
+   amends the text as the earlier left it, and e-Gov's current revision is the last
+   promulgated: checked on 2026-11-27, this matched e-Gov in all 207 laws whose current
+   revision shares its day with another; ordering by amending law ID alone missed 3.
 3. Render each changed law to markdown and emit the commit through
    `git fast-import`.
-4. Revisions with status `UnEnforced` go on branch `upcoming`, built on top of `main`.
-   `main` holds enforced revisions only, so it never contains future-dated commits.
+4. Revisions enforced after the day of the build (JST), or with no date and status
+   `UnEnforced`, go on branch `upcoming`, built on top of `main`. `main` holds enforced
+   revisions only, so it never contains future-dated commits. The date decides, not the
+   status, as for e-Gov's current revision: e-Gov keeps the status `UnEnforced` past the
+   date for some revisions (every revision of 9 repealed laws on 2026-11-27, and the
+   2026-11-26 revision of 租税特別措置法 a day later), which put the commits of their amending laws on
+   `upcoming`.
 
 A law's earliest available revision is added in the commit of its own amending law,
 the same as any later revision.
 
 A repeal is a commit like any other. e-Gov lists repealed laws, and the repeal is a
-revision with status `Repeal` whose amending law is the repealing law and whose
+revision with status `Repeal` (or `UnEnforced` with a `repeal_status` other than
+`None`) whose amending law is the repealing law and whose
 enforcement date is the repeal date. That revision deletes the file in the
 repealing law's commit, so `HEAD` holds only laws in force and `git log -- <file>`
 still shows the whole life of a law. Laws repealed but kept in force for transition
 (`remain_in_force`) are deleted too. A repeal of a law with no earlier revision in
 the data adds nothing, and any
-later revision of a repealed law is ignored, even one dated the same day under a higher
-amending-law ID (e-Gov lists it as enforced just before the repeal; 独立行政法人国立女性教育会館法
+later revision of a repealed law is ignored, even one dated the same day and ordered after
+the repeal (e-Gov lists it as enforced just before the repeal; 独立行政法人国立女性教育会館法
 on 2026-04-01 was the one case). The frontmatter has no repeal field: a file exists only
 while its law is in force.
 

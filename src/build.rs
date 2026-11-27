@@ -295,7 +295,7 @@ pub fn build(cache: &Cache, out: &Path, o: &Options) -> anyhow::Result<Report> {
                 loaded.excluded.join(" ")
             );
         }
-        let (main, upcoming) = plan(loaded.revisions);
+        let (main, upcoming) = plan(loaded.revisions, &crate::fetch::today_jst());
         let bills = Bills::load(cache)?;
         let history = History {
             main: &main,
